@@ -1,0 +1,2 @@
+google-api-python-client >= 1.6.2
+selenium >= 3.3.3
