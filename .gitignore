@@ -2,3 +2,7 @@
 __pycache__/
 *$py.class
 *.log
+bin/
+include/
+lib/
+*.json
