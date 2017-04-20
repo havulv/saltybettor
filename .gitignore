@@ -8,3 +8,5 @@ lib/
 *.json
 phantomjs*
 selenium
+Scripts
+tcl
