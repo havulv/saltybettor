@@ -2,6 +2,7 @@
 
 ''' Potentially use PhantomJS instead of Chrome webdriver '''
 
+import sys
 import logging as log
 from bs4 import BeautifulSoup as bs
 from selenium.common import exceptions as Except
@@ -46,9 +47,31 @@ def authenticate(driver, credentials):
     return True
 
 
-def get_money(source):
+def get_your_money(source):
     dollar = source.find("span", class_="dollar", id="balance")
     return int(dollar.text) if dollar is not None else 0
+
+
+def odds(source):
+    b_odds = []
+    for tag in source.find_all("span", id="odds"):
+        b_odds(tag.find("li").text)
+        b_odds.append(tag.find("span", class_="redtext").text)
+        b_odds.append(tag.find("span", class_="bluetext").text)
+    return b_odds
+
+
+def bet(driver, amount, player):
+    assert(player == "player1" or player == "player2")
+    sent = False
+    source = bs(driver.page_source, 'html.parser')
+    if "none" in source.find("input", placeholder="Wager")['style'] and False:  # Betting disabled while testing
+        elem = driver.find_element_by_id("wager")
+        choice = driver.find_element_by_id(player)
+        elem.send_keys(str(amount))
+        choice.submit()
+        sent = True
+    return sent
 
 
 # This is for preliminary testing, change in the future
@@ -65,7 +88,7 @@ def get_credentials():
     return {"email": email, "pword": passwd}
 
 
-def main():
+def main(email=None, pwrd=None):
     driver = None
     driver_name = ""
     print("Initializing webdriver...")
@@ -85,11 +108,19 @@ def main():
     print("Querying site...")
     driver.get("https://www.saltybet.com")
     print("Site reached, authenticating...")
-    if not authenticate(driver, get_credentials()):
+
+    if email is not None and pwrd is not None:
+        creds = {"email": email, "pword": pwrd}
+    else:
+        creds = get_credentials()
+    if not authenticate(driver, creds):
         raise Exception("Incorrect credentials, full restart")  # FIXME: should this be handled differently?
     source = bs(driver.page_source, 'html.parser')
-    print("$%s" % get_money(source))
+    print(bet(driver, 1, "player1"), odds(source))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main(email=sys.argv[1], pwrd=sys.argv[2])
+    except IndexError:
+        main()
