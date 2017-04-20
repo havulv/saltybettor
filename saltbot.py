@@ -2,6 +2,7 @@
 
 ''' Potentially use PhantomJS instead of Chrome webdriver '''
 
+import time
 import sys
 import logging as log
 from bs4 import BeautifulSoup as bs
@@ -47,13 +48,26 @@ def authenticate(driver, credentials):
     return True
 
 
-def get_bets(source, player):
-    player_bets = []
-    table = source.find("betting-table")
-    for bet in table.find("bet tag", player):
-        player_bets.append(bet.text)
+def get_bettors(source):
+    player_bets = {}
+    table = source.find("div", id="sbettorswrapper")
+    for i, txt in [("1", "redtext"), ("2", "bluetext")]:
+        player = table.find('div', id="sbettors" + i).find('span', class_=txt).text
+        player_bets[player] = []
+        for tag in table.find_all('p', class_='bettor-line'):
+            bet = tag.find('span', class_='greentext wager-display')
+            bettor = tag.find('strong')
+            if bet is not None and bettor is not None:
+                player_bets[player].append({'bet': bet.text, 'bettor': bettor.text})
     return player_bets
 
+
+def get_players(source):
+    players = []
+    table = source.find('div', id='bet-table')
+    for tag in table.find_all('span', class_='submit'):
+        players.append(tag.find('input')['value'])
+    return players
 
 
 def get_your_money(source):
@@ -61,13 +75,28 @@ def get_your_money(source):
     return int(dollar.text) if dollar is not None else 0
 
 
+def bet_for(source):
+    b_for = []
+    bet_tag = source.find("span", id="odds")
+    if bet_tag.find("span", class_="redtext") is not None:
+        b_for.append(bet_tag.text)
+        b_for.append(bet_tag.find("span", class_="redtext").text)
+        b_for.append(bet_tag.find("span", class_="bluetext").text)
+    else:
+        b_for = False
+    return b_for
+
+
 def odds(source):
-    b_odds = []
-    for tag in source.find_all("span", id="odds"):
-        b_odds(tag.find("li").text)
-        b_odds.append(tag.find("span", class_="redtext").text)
-        b_odds.append(tag.find("span", class_="bluetext").text)
-    return b_odds
+    bet_odds = []
+    bet_tag = source.find("span", id="lastbet")
+    if bet_tag.find("span", class_="redtext") is not None:
+        bet_odds.append(bet_tag.text)
+        bet_odds.append(bet_tag.find("span", class_="redtext").text)
+        bet_odds.append(bet_tag.find("span", class_="bluetext").text)
+    else:
+        bet_odds = False
+    return bet_odds
 
 
 def bet(driver, amount, player):
@@ -124,8 +153,15 @@ def main(email=None, pwrd=None):
         creds = get_credentials()
     if not authenticate(driver, creds):
         raise Exception("Incorrect credentials, full restart")  # FIXME: should this be handled differently?
-    source = bs(driver.page_source, 'html.parser')
-    print(bet(driver, 1, "player1"), odds(source))
+    while True:
+        source = bs(driver.page_source, 'html.parser')
+        print("Placing a bet for player1: {}".format(bet(driver, 1, "player1")))
+        print("Odds for players: {}".format(odds(source)))
+        print("Total bets for players: {}".format(bet_for(source)))
+        print("list of bettors: {} ".format(get_bettors(source).keys()))
+        print("Players involved: {}".format(get_players(source)))
+        print("Your money: {}".format(get_your_money(source)))
+        time.sleep(5)
 
 
 if __name__ == "__main__":
