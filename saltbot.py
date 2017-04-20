@@ -47,6 +47,15 @@ def authenticate(driver, credentials):
     return True
 
 
+def get_bets(source, player):
+    player_bets = []
+    table = source.find("betting-table")
+    for bet in table.find("bet tag", player):
+        player_bets.append(bet.text)
+    return player_bets
+
+
+
 def get_your_money(source):
     dollar = source.find("span", class_="dollar", id="balance")
     return int(dollar.text) if dollar is not None else 0
