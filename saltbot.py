@@ -12,104 +12,189 @@ from selenium import webdriver
 log.basicConfig(filename="selenium.log", level=log.DEBUG)
 
 
-def authenticate(driver, credentials):
-    '''
-        Authenticates the user's credentials on the relevant pages of
-            saltybets.
-            args:
-                driver      -> type == selenium.webdriver
-                credentials -> type == dictionary
-            returns:
-                bool
+class SaltBot(object):
 
-        I really hate that this is a function because it has huge side effects
-            It changes the ENTIRE state of the browser. But this can't be
-            avoided because the web is stateful. Damn web
-        In the end, the IO has to be somewhere so at least it is all in one
-            place and then only changes one item of global state
-            i.e. site -> authenticate -> site (authenticated)
-    '''
-    auth_url = "https://www.saltybet.com/authenticate?signin=1"
-    redirect = "http://www.saltybet.com/"
-    driver.get(auth_url)
-    elem = driver.find_element_by_id("email")  # In case nothing is found later
-    for item in credentials.keys():
-        elem = driver.find_element_by_id(item)
-        elem.send_keys(credentials[item])
-    log.info("Authorization submitted for {}")
-    elem.submit()
-    if driver.current_url != redirect and \
-            driver.current_url == auth_url:
-        log.info("Authorization failed properly")
-        return False
-    elif driver.current_url != redirect:
-        log.info("Authorization failed disastrously")
-        raise Exception("AuthenticationError: incorrect redirect")
-    return True
+    auth = False
 
+    def __init__(self, credentials):
+        self.bet_table = {}
+        self.players = []
+        self._can_bet = False
+        self._base_url = "http://www.saltybet.com/"
+        self._auth_url = self._base_url + "authenticate?signin=1"
+        self.driver, self.driver_name = self._driver_init()
+        if self._authenticate(credentials):
+            log.info("Authorized")
+            del credentials
+        else:
+            raise Exception("AuthenticationError")
 
-def get_bettors(source):
-    player_bets = {}
-    table = source.find("div", id="sbettorswrapper")
-    for i, txt in [("1", "redtext"), ("2", "bluetext")]:
-        player = table.find('div', id="sbettors" + i).find('span', class_=txt).text
-        player_bets[player] = []
-        for tag in table.find_all('p', class_='bettor-line'):
-            bet = tag.find('span', class_='greentext wager-display')
-            bettor = tag.find('strong')
-            if bet is not None and bettor is not None:
-                player_bets[player].append({'bet': bet.text, 'bettor': bettor.text})
-    return player_bets
+    def _driver_init(self):
+        driver = None
+        log.info("Searching for driver")
+        for layer, name in [(webdriver.Chrome, "Chrome"),
+                            (webdriver.PhantomJS, "PhantomJS")]:
+            try:
+                driver = layer()
+                driver_name = name
+                break
+            except Except.WebDriverException:
+                pass
+        if driver is None:
+            raise Except.WebDriverException
+        log.info("Driver {} found".format(driver_name))
 
+        return driver, driver_name
 
-def get_players(source):
-    players = []
-    table = source.find('div', id='bet-table')
-    for tag in table.find_all('span', class_='submit'):
-        players.append(tag.find('input')['value'])
-    return players
+    def _authenticate(self, credentials):
+        '''
+            Authenticates the user's credentials on the relevant pages of
+                saltybets.
+                args:
+                    driver      -> type == selenium.webdriver
+                    credentials -> type == dictionary
+                returns:
+                    bool
 
+            I really hate that this is a function because it has huge side effects
+                It changes the ENTIRE state of the browser. But this can't be
+                avoided because the web is stateful. Damn web
+            In the end, the IO has to be somewhere so at least it is all in one
+                place and then only changes one item of global state
+                i.e. site -> authenticate -> site (authenticated)
+        '''
+        self.driver.get(self._auth_url)
+        elem = self.driver.find_element_by_id("email")  # In case nothing is found later
+        for item in credentials.keys():
+            elem = self.driver.find_element_by_id(item)
+            elem.send_keys(credentials[item])
+        log.info("Authorization submitted for {}")
+        elem.submit()
+        if self.driver.current_url != self._base_url and \
+                self.driver.current_url == self._auth_url:
+            log.info("Authorization failed properly")
+            return False
+        elif self.driver.current_url != self._base_url:
+            log.info("Authorization failed disastrously")
+            raise Exception("AuthenticationError: incorrect redirect")
+        return True
 
-def get_your_money(source):
-    dollar = source.find("span", class_="dollar", id="balance")
-    return int(dollar.text) if dollar is not None else 0
+    def _check_bet(self):
+        checker = []
+        table = bs(self.driver.page_source, 'html.parser').find('div', id='bet-table')
+        for tag in table.find_all('span', class_='submit'):
+            checker.append(tag.find('input')['value'])
+        self._can_bet = all(checker)
 
+    def update_bettors(self):
+        ret = False
+        self._check_bet()
+        table = bs(self.driver.page_source, 'html.parser').find("div", id="sbettorswrapper")
+        if table is not None and not self._can_bet:
+            # reset the players
+            del self.bet_table
+            self.bet_table = {}
+            for i, txt in [("1", "redtext"), ("2", "bluetext")]:
+                player = table.find('div', id="sbettors" + i).find('span', class_=txt).text
+                player = [x.strip() for x in player.split("|")][int(i) - 1]
+                if player not in [i[0] for i in self.players]:
+                    self.players.append([player, 0, 0])
+                    if len(self.players) > 2:
+                        self.players.pop(0)
+                self.bet_table[player] = []
+                for tag in table.find_all('p', class_='bettor-line'):
+                    bet = tag.find('span', class_='greentext wager-display')
+                    bettor = tag.find('strong')
+                    if bet is not None and bettor is not None:
+                        bet_val = 0
+                        try:
+                            if 'K' in bet.text:
+                                bet_val = int(float(bet.text.strip()[1:-1]) * 1000)
+                            else:
+                                if bet.text:
+                                    bet_val = int(bet.text.strip()[1:].replace(",", ""))
+                        except ValueError:
+                            print("Error on conversion {} {}".format(bet.text, bettor.text))
+                        self.bet_table[player].append({'bet': bet_val, 'bettor': bettor.text})
+            ret = True
+        return ret
 
-def bet_for(source):
-    b_for = []
-    bet_tag = source.find("span", id="odds")
-    if bet_tag.find("span", class_="redtext") is not None:
-        b_for.append(bet_tag.text)
-        b_for.append(bet_tag.find("span", class_="redtext").text)
-        b_for.append(bet_tag.find("span", class_="bluetext").text)
-    else:
-        b_for = False
-    return b_for
+    def update_players(self):
+        ret = False
+        self._check_bet()
+        if self._can_bet:
+            table = bs(self.driver.page_source, 'html.parser').find('div', id='bet-table')
+            for tag in table.find_all('span', class_='submit'):
+                player = tag.find('input')['value']
+                if player not in [i[0] for i in self.players] and player:
+                    self.players.append([player, 0, 0])
+                    if len(self.players) > 2:
+                        self.players.pop(0)
+            ret = True
+        return ret
 
+    def update_money(self):
+        dollar = bs(self.driver.page_source, 'html.parser').find("span", class_="dollar", id="balance")
+        return int(dollar.text) if dollar is not None else 0
 
-def odds(source):
-    bet_odds = []
-    bet_tag = source.find("span", id="lastbet")
-    if bet_tag.find("span", class_="redtext") is not None:
-        bet_odds.append(bet_tag.text)
-        bet_odds.append(bet_tag.find("span", class_="redtext").text)
-        bet_odds.append(bet_tag.find("span", class_="bluetext").text)
-    else:
-        bet_odds = False
-    return bet_odds
+    def update_bets_for(self):
+        ret = False
+        bet_tag = bs(self.driver.page_source, 'html.parser').find("span", id="odds")
+        print("checking if there is redtext")
+        if bet_tag.find("span", class_="redtext") is not None:
+            b_for = {}
+            print("gathering the money stats")
+            for team in bet_tag.text.split("\xa0\xa0"):
+                b_for[" ".join(team.split(" ")[:-1]).strip()] = int(
+                    team.split(" ")[-1].strip(" $").replace(",", ""))
+            for player, money in b_for.items():
+                print(player, self.players, [i[0] for i in self.players])
+                if player in [i[0] for i in self.players]:
+                    self.players[[i[0] for i in self.players].index(player)][2] = money
+            ret = True
+        return ret
 
+    def update_odds(self):
+        ret = False
+        bet_tag = bs(self.driver.page_source, 'html.parser').find("span", id="lastbet")
+        if bet_tag.find("span", class_="redtext") is not None:
+            bet_odds = [bet_tag.find("span", class_="redtext").text]
+            bet_odds.append(bet_tag.find("span", class_="bluetext").text)
 
-def bet(driver, amount, player):
-    assert(player == "player1" or player == "player2")
-    sent = False
-    source = bs(driver.page_source, 'html.parser')
-    if "none" in source.find("input", placeholder="Wager")['style'] and False:  # Betting disabled while testing
-        elem = driver.find_element_by_id("wager")
-        choice = driver.find_element_by_id(player)
-        elem.send_keys(str(amount))
-        choice.submit()
-        sent = True
-    return sent
+            try:
+                bet_odds = list(map(float, bet_odds))
+            except ValueError:
+                bet_odds = [0, 0]
+
+            self.players[0][1] = bet_odds[0]
+            self.players[1][1] = bet_odds[1]
+            ret = True
+        return ret
+
+    def bet(self, amount, player):
+        assert(player == "player1" or player == "player2")
+        sent = False
+        source = bs(self.driver.page_source, 'html.parser')
+        if "none" in source.find("input", placeholder="Wager")['style'] and False:  # Betting disabled while testing
+            elem = self.driver.find_element_by_id("wager")
+            choice = self.driver.find_element_by_id(player)
+            elem.send_keys(str(amount))
+            choice.submit()
+            sent = True
+        return sent
+
+    def run(self):
+        try:
+            while True:
+                for func in [self.update_bettors, self.update_players,
+                             self.update_money, self.update_bets_for,
+                             self.update_odds]:
+                    print("Running {}".format(func.__name__))
+                    print("Successful") if func() else print("Failed")
+                    print(self.players)
+                time.sleep(5)
+        except KeyboardInterrupt:
+            print("Cleaning up")
 
 
 # This is for preliminary testing, change in the future
@@ -127,41 +212,8 @@ def get_credentials():
 
 
 def main(email=None, pwrd=None):
-    driver = None
-    driver_name = ""
-    print("Initializing webdriver...")
-    for layer, name in [(webdriver.Chrome, "Chrome"),
-                        (webdriver.PhantomJS, "PhantomJS")]:
-        try:
-            driver = layer()
-            driver_name = name
-            break
-        except Except.WebDriverException:
-            pass
-
-    if driver is None:
-        raise Exception("No webdriver found")
-
-    print("Webdriver %s was initialized" % driver_name)
-    print("Querying site...")
-    driver.get("https://www.saltybet.com")
-    print("Site reached, authenticating...")
-
-    if email is not None and pwrd is not None:
-        creds = {"email": email, "pword": pwrd}
-    else:
-        creds = get_credentials()
-    if not authenticate(driver, creds):
-        raise Exception("Incorrect credentials, full restart")  # FIXME: should this be handled differently?
-    while True:
-        source = bs(driver.page_source, 'html.parser')
-        print("Placing a bet for player1: {}".format(bet(driver, 1, "player1")))
-        print("Odds for players: {}".format(odds(source)))
-        print("Total bets for players: {}".format(bet_for(source)))
-        print("list of bettors: {} ".format(get_bettors(source).keys()))
-        print("Players involved: {}".format(get_players(source)))
-        print("Your money: {}".format(get_your_money(source)))
-        time.sleep(5)
+    salt_bot = SaltBot(get_credentials())
+    salt_bot.run()
 
 
 if __name__ == "__main__":
