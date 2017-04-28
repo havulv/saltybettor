@@ -6,6 +6,7 @@ import time
 import sys
 import logging as log
 from bs4 import BeautifulSoup as bs
+from . import database
 from selenium.common import exceptions as Except
 from selenium import webdriver
 
