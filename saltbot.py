@@ -6,7 +6,7 @@ import time
 import sys
 import logging as log
 from bs4 import BeautifulSoup as bs
-from . import database
+from .database import betdb
 from selenium.common import exceptions as Except
 from selenium import webdriver
 
@@ -29,6 +29,8 @@ class SaltBot(object):
             del credentials
         else:
             raise Exception("AuthenticationError")
+        self._db = betdb()
+        self._db.create_fight_table()
 
     def _driver_init(self):
         driver = None
@@ -141,15 +143,12 @@ class SaltBot(object):
     def update_bets_for(self):
         ret = False
         bet_tag = bs(self.driver.page_source, 'html.parser').find("span", id="odds")
-        print("checking if there is redtext")
         if bet_tag.find("span", class_="redtext") is not None:
             b_for = {}
-            print("gathering the money stats")
             for team in bet_tag.text.split("\xa0\xa0"):
                 b_for[" ".join(team.split(" ")[:-1]).strip()] = int(
                     team.split(" ")[-1].strip(" $").replace(",", ""))
             for player, money in b_for.items():
-                print(player, self.players, [i[0] for i in self.players])
                 if player in [i[0] for i in self.players]:
                     self.players[[i[0] for i in self.players].index(player)][2] = money
             ret = True
@@ -183,6 +182,38 @@ class SaltBot(object):
             choice.submit()
             sent = True
         return sent
+
+    def record(self):
+        try:
+            old_players = []
+            fight_time = None
+            while True:
+                self.update_bettors()
+                self.update_players()
+                self.update_money()
+                self.update_bets_for()
+                self.update_odds()
+                if not all(map(lambda x, y: x == y, zip(old_players, self.players))):
+                    fight_time = self._db.new_fight(self.players[0][0], self.players[1][0],
+                                                    self.players[0][1], self.players[1][1],
+                                                    self.players[0][2], self.playerse[2][2])
+                    if self.bet_table and all(map(lambda x: x in self.players,
+                            self.bet_table.values())):
+                        self._db.insert_bettors(
+                            self.players[0][0], self.players[1][0],
+                            fight_time, self.bet_table)
+                else:
+                    self._db.update_odds(self.players[0][0], self.players[1][0],
+                                         self.players[0][1], self.players[1][1])
+                    self._db.update_money(self.players[0][0], self.players[1][0],
+                                          self.players[0][2], self.players[1][2])
+                    if self.bet_table and all(map(lambda x: x in self.players,
+                            self.bet_table.values())) and :
+
+
+        except KeyboardInterrupt:
+            print("Cleaning up")
+
 
     def run(self):
         try:
