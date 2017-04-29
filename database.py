@@ -14,10 +14,11 @@ class betdb(object):
 
     def create_fight_table(self):
         curs = self.conn.cursor()
-        curs.execute('SELECT COUNT(*) from information_schema.tables'
-                     ' where table_name=fights')
-        if curs.fetchone()[0] is None:
-            curs.execute('CREATE TABLE fights (date text, time '
+        curs.execute("SELECT name from sqlite_master where "
+                     "type='table' and name=:tble",
+                     {'tble': "'fights'"})
+        if curs.fetchone() is None:
+            curs.execute('CREATE TABLE if not exists fights(date text, time '
                          'timestamp, team1 text, team2 text, odds1'
                          ' float, odds2 float, money1 integer, '
                          'money2 integer)')
@@ -28,26 +29,44 @@ class betdb(object):
         curs = self.conn.cursor()
         curs.execute('insert into fights(date, time, team1, '
                      'team2) values (?, ?, ?, ?, ?, ?, ?, ?)',
-                     date, date, team1, team2, odds1, odds2,
-                     money1, money2)
+                     date, date, team1.strip(), team2.strip(),
+                     odds1, odds2, money1, money2)
         curs.close()
         self.create_bettor_table(team1, team2, date)
         return date
 
+    def get_odds(self, team1, team2):
+        curs = self.conn.cursor()
+        curs.execute('select top 1 * from fights where '
+                     "team1=':team1' and team2=':team2' order by"
+                     ' date desc', team1, team2)
+        ret = curs.fetchone()
+        curs.close()
+        return ret
+
+    def get_money(self, team1, team2):
+        curs = self.conn.cursor()
+        curs.execute('select top 1 * from fights where '
+                     "team1=':team1' and team2=':team2' order by"
+                     ' date desc', team1, team2)
+        ret = curs.fetchone()
+        curs.close()
+        return ret
+
     def update_odds(self, team1, team2, odds1, odds2):
         curs = self.conn.cursor()
-        curs.execute('update fights set (odds1=:odds1, '
-                     'odds2=:odds2) where team1=:team1, '
-                     'team2=:team2',
-                     {"team1": team1, "team2": team2,
-                      "odds1": odds1, "odds2": odds2})
+        curs.execute("update fights set odds1 = :od1, "
+                     "odds2 = :od2 where team1 = ':tm1'"
+                     " and team2 = ':tm2'",
+                     {"tm1": team1.strip(), "tm2": team2.strip(),
+                      "od1": odds1, "od2": odds2})
         curs.close()
 
     def update_money(self, team1, team2, money1, money2):
         curs = self.conn.cursor()
-        curs.execute('update fights set (money1=:money1, '
-                     'money2=:money2) where team1=:team1, '
-                     'team2=:team2',
+        curs.execute('update fights set money1=:money1, '
+                     "money2=:money2 where team1=':team1' "
+                     " and team2=':team2'",
                      {"team1": team1, "team2": team2,
                       "money1": money1, "money2": money2})
         curs.close()
@@ -55,8 +74,8 @@ class betdb(object):
     def update_bet(self, team1, team2, date, team, bettor, bet):
         curs = self.conn.cursor()
         curs.execute('update fight_{}_{}_{}(team, bettor, bet)'
-                     ' set (bet=:bet) where team=:team, '
-                     'bettor=:bettor'.format(
+                     " set bet=:bet where team=':team'"
+                     " and bettor=':bettor'".format(
                          team1, team2,
                          dt.strftime(date, '%m-%d-%Y-%M:%S')),
                      {'team': team, 'bettor': bettor, 'bet': bet})
@@ -71,12 +90,23 @@ class betdb(object):
                      {"date": day, "time": time})
         curs.close()
 
+    def bet_table_empty(self, team1, team2, date):
+        ret = False
+        if date is not None:
+            ret = True
+            curs = self.conn.cursor()
+            curs.execute('select top 1 * from fight_{}_{}_{}'.format(
+                         team1, team2, dt.strftime(date, '%m-%d-%Y-%M:%S')))
+            if curs.fetchone() is None:
+                ret = False
+        return ret
+
     def create_bettor_table(self, team1, team2, date):
         curs = self.conn.cursor()
         curs.execute('SELECT COUNT(*) from information_schema.tables'
                      ' where table_name=fight_{}_{}_{}'.format(
                          team1, team2, dt.strftime(date, '%m-%d-%Y-%M:%S')))
-        if curs.fetchone()[0] is None:
+        if curs.fetchone() is None:
             curs.execute('create table fight_{}_{}_{} '
                          '(team text, bettor text, bet integer)'
                          ''.format(team1, team2,

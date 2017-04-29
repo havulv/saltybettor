@@ -10,3 +10,5 @@ phantomjs*
 selenium
 Scripts
 tcl
+*.db
+*.swp

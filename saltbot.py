@@ -1,12 +1,22 @@
 #! /usr/bin/env python3
 
-''' Potentially use PhantomJS instead of Chrome webdriver '''
+'''
+    Potentially use PhantomJS instead of Chrome webdriver
+
+    TODO: Implement a timer thread, so that the database writes
+          arent't counted in addition to the sleeper
+'''
 
 import time
 import sys
 import logging as log
 from bs4 import BeautifulSoup as bs
-from .database import betdb
+
+# Python 3.5 compatibility
+try:
+    from .database import betdb
+except ModuleNotFoundError:
+    from database import betdb
 from selenium.common import exceptions as Except
 from selenium import webdriver
 
@@ -17,13 +27,13 @@ class SaltBot(object):
 
     auth = False
 
-    def __init__(self, credentials):
+    def __init__(self, credentials, driver=None):
         self.bet_table = {}
         self.players = []
         self._can_bet = False
         self._base_url = "http://www.saltybet.com/"
         self._auth_url = self._base_url + "authenticate?signin=1"
-        self.driver, self.driver_name = self._driver_init()
+        self.driver, self.driver_name = self._driver_init(driver)
         if self._authenticate(credentials):
             log.info("Authorized")
             del credentials
@@ -32,17 +42,22 @@ class SaltBot(object):
         self._db = betdb()
         self._db.create_fight_table()
 
-    def _driver_init(self):
-        driver = None
+    def _driver_init(self, driver):
+        avail = [(webdriver.Chrome, "Chrome"),
+                 (webdriver.PhantomJS, "PhantomJS")]
         log.info("Searching for driver")
-        for layer, name in [(webdriver.Chrome, "Chrome"),
-                            (webdriver.PhantomJS, "PhantomJS")]:
-            try:
-                driver = layer()
-                driver_name = name
-                break
-            except Except.WebDriverException:
-                pass
+        if driver is not None:
+            driver_name = driver
+            driver = avail[[i[1].lower() for i in avail].index(
+                driver.lower())][0]()
+        else:
+            for layer, name in avail:
+                try:
+                    driver = layer()
+                    driver_name = name
+                    break
+                except Except.WebDriverException:
+                    pass
         if driver is None:
             raise Except.WebDriverException
         log.info("Driver {} found".format(driver_name))
@@ -184,36 +199,61 @@ class SaltBot(object):
         return sent
 
     def record(self):
+        updates = [self.update_bettors, self.update_players,
+                   self.update_money, self.update_bets_for,
+                   self.update_odds]
         try:
             old_players = []
+            update_arr = {z.__name__: False for z in updates}
             fight_time = None
             while True:
-                self.update_bettors()
-                self.update_players()
-                self.update_money()
-                self.update_bets_for()
-                self.update_odds()
-                if not all(map(lambda x, y: x == y, zip(old_players, self.players))):
+                print("Players: {}".format(
+                    ", ".join(["(" + ", ".join(map(str, i)) + ")" for i in self.players])))
+                for i in updates:
+                    update_arr[i.__name__] = i()
+
+                print("Updated members:\n{}".format(" ".join(
+                    ["{}: {}".format(i, j) for i, j in update_arr.items()])))
+
+                print("Checking database writes")
+
+                if not all(map(lambda x: x[0] == x[1], zip(old_players, self.players))):
                     fight_time = self._db.new_fight(self.players[0][0], self.players[1][0],
                                                     self.players[0][1], self.players[1][1],
                                                     self.players[0][2], self.playerse[2][2])
-                    if self.bet_table and all(map(lambda x: x in self.players,
-                            self.bet_table.values())):
+                    print("New players")
+                    if self.bet_table and all(map(
+                            lambda x: x in self.players,
+                            self.bet_table.keys())) and all(self.bet_table.values()):
                         self._db.insert_bettors(
                             self.players[0][0], self.players[1][0],
                             fight_time, self.bet_table)
-                else:
-                    self._db.update_odds(self.players[0][0], self.players[1][0],
-                                         self.players[0][1], self.players[1][1])
-                    self._db.update_money(self.players[0][0], self.players[1][0],
-                                          self.players[0][2], self.players[1][2])
-                    if self.bet_table and all(map(lambda x: x in self.players,
-                            self.bet_table.values())) and :
 
+                    print("New players written")
+                else:
+                    if all(map(lambda x: x[1] != 0, self.players)):
+                        self._db.update_odds(self.players[0][0], self.players[1][0],
+                                             self.players[0][1], self.players[1][1])
+                        print("Updated odds")
+                    if all(map(lambda x: x[2] != 0, self.players)):
+                        self._db.update_money(self.players[0][0], self.players[1][0],
+                                              self.players[0][2], self.players[1][2])
+                        print("Updated money")
+                    if self.bet_table and all(map(
+                            lambda x: x in self.players,
+                            self.bet_table.values())) and all(self.bet_table.values()):
+                        if not self._db.bet_table_empty(self.players[0][0],
+                                                        self.players[0][1],
+                                                        fight_time):
+                            self._db.insert_bettors(
+                                self.players[0][0], self.players[1][0],
+                                fight_time, self.bet_table)
+                        print("Updated bet table")
+                old_players = self.players
+                time.sleep(10)
 
         except KeyboardInterrupt:
             print("Cleaning up")
-
 
     def run(self):
         try:
@@ -244,8 +284,11 @@ def get_credentials():
 
 
 def main(email=None, pwrd=None):
-    salt_bot = SaltBot(get_credentials())
-    salt_bot.run()
+    drive = input("Specific driver? ")
+    if drive == "no":
+        drive = None
+    salt_bot = SaltBot(get_credentials(), driver=drive)
+    salt_bot.record()
 
 
 if __name__ == "__main__":
