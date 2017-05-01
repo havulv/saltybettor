@@ -8,15 +8,12 @@
 '''
 
 import time
-from datetime import datetime as dt
-import sys
 import logging as log
+from datetime import datetime as dt
 from bs4 import BeautifulSoup as bs
-
-# Python 3.5 compatibility
 from database import betdb
-from selenium.common import exceptions as Except
 from selenium import webdriver
+from selenium.common import exceptions as Except
 
 log.basicConfig(filename="saltbot.log", level=log.INFO,
                 format="%(asctime)s [%(levelname)s] :: %(message)s")
@@ -29,7 +26,7 @@ class SaltBot(object):
     def __init__(self, credentials, driver=None):
         self.prev_winner = None
         self.bet_table = {}
-        self.players = []
+        self.players = [[None, 0, 0], [None, 0, 0]]
         self._can_bet = False
         self._base_url = "http://www.saltybet.com/"
         self._auth_url = self._base_url + "authenticate?signin=1"
@@ -47,9 +44,19 @@ class SaltBot(object):
                  (webdriver.PhantomJS, "PhantomJS")]
         log.info("Searching for driver")
         if driver is not None:
-            driver_name = driver
-            driver = avail[[i[1].lower() for i in avail].index(
-                driver.lower())][0]()
+            driver_set = list(map(lambda x: x.lower().strip(), driver.split(' ')))
+            if len(driver_set) < 2:
+                driver_name = driver_set[0]
+                driver = avail[[i[1].lower() for i in avail].index(
+                    driver.lower())][0]()
+            else:
+                # If using chrome headless then the input is [chrome, headless, path]
+                if 'headless' in driver_set and "chrome" in driver_set:
+                    options = webdriver.ChromeOptions()
+                    options.binary_location = driver_set[2]
+                    options.add_argument('headless')
+                    driver = webdriver.Chrome(chrome_options=options)
+
         else:
             for layer, name in avail:
                 try:
@@ -86,7 +93,7 @@ class SaltBot(object):
         for item in credentials.keys():
             elem = self.driver.find_element_by_id(item)
             elem.send_keys(credentials[item])
-        log.info("Authorization submitted for {}")
+        log.info("Authorization submitted for {}".format(credentials['email']))
         elem.submit()
         if self.driver.current_url != self._base_url and \
                 self.driver.current_url == self._auth_url:
@@ -128,29 +135,36 @@ class SaltBot(object):
             del self.bet_table
             self.bet_table = {}
             for i, txt in [("1", "redtext"), ("2", "bluetext")]:
-                player = table.find('div', id="sbettors" + i).find('span', class_=txt).text
-                player = [x.strip() for x in player.split("|")][int(i) - 1]
-                if player not in [i[0] for i in self.players]:
-                    self.players.append([player, 0, 0])
-                    if len(self.players) > 2:
-                        self.players.pop(0)
-                self.bet_table[player] = []
-                for tag in table.find_all('p', class_='bettor-line'):
-                    bet = tag.find('span', class_='greentext wager-display')
-                    bettor = tag.find('strong')
-                    if bet is not None and bettor is not None:
-                        bet_val = 0
-                        try:
-                            if 'K' in bet.text:
-                                bet_val = int(float(bet.text.strip()[1:-1]) * 1000)
-                            elif 'M' in bet.text:
-                                bet_val = int(float(bet.text.strip()[1:-1]) * 1000000)
-                            else:
-                                if bet.text:
-                                    bet_val = int(bet.text.strip()[1:].replace(",", ""))
-                        except ValueError:
-                            log.info("Error on conversion {} {}".format(bet.text, bettor.text))
-                        self.bet_table[player].append({'bet': bet_val, 'bettor': bettor.text})
+                player = table.find('div', id="sbettors" + i).find('span', class_=txt)
+                if player is not None:
+                    player = player.text
+                    try:
+                        player = [x.strip() for x in player.split("|")][int(i) - 1]
+                    except IndexError:
+                        print(player)
+                        print([x.strip() for x in player.split("|")])
+                        print(int(i) - 1)
+                    if player not in [i[0] for i in self.players]:
+                        self.players.append([player, 0, 0])
+                        if len(self.players) > 2:
+                            self.players.pop(0)
+                    self.bet_table[player] = []
+                    for tag in table.find_all('p', class_='bettor-line'):
+                        bet = tag.find('span', class_='greentext wager-display')
+                        bettor = tag.find('strong')
+                        if bet is not None and bettor is not None:
+                            bet_val = 0
+                            try:
+                                if 'K' in bet.text:
+                                    bet_val = int(float(bet.text.strip()[1:-1]) * 1000)
+                                elif 'M' in bet.text:
+                                    bet_val = int(float(bet.text.strip()[1:-1]) * 1000000)
+                                else:
+                                    if bet.text:
+                                        bet_val = int(bet.text.strip()[1:].replace(",", ""))
+                            except ValueError:
+                                log.info("Error on conversion {} {}".format(bet.text, bettor.text))
+                            self.bet_table[player].append({'bet': bet_val, 'bettor': bettor.text})
             ret = True
         return ret
 
@@ -224,7 +238,7 @@ class SaltBot(object):
                    self.update_money, self.update_bets_for,
                    self.update_odds, self.update_winner]
         try:
-            old_players = []
+            old_players = [None, None]
             update_arr = {z.__name__: False for z in updates}
             fight_time = None
             while True:
@@ -238,36 +252,34 @@ class SaltBot(object):
 
                 log.debug("Checking database writes")
 
-                if not all(map(lambda x: x[0] == x[1], zip(old_players, self.players))):
-                    fight_time = self._db.new_fight(self.players[0][0], self.players[1][0],
-                                                    self.players[0][1], self.players[1][1],
-                                                    self.players[0][2], self.playerse[2][2])
+                if old_players[0] != self.players[0][0] and old_players[1] != self.players[1][0]:
+                    fight_time = self._db.new_fight(self.players[0][0], self.players[1][0])
                     log.info("New players: {}".format(" vs. ".join([i[0] for i in self.players])))
-                    if self.bet_table and all(map(
-                            lambda x: x in self.players,
-                            self.bet_table.keys())) and all(self.bet_table.values()):
+                    if self.bet_table and all(map(lambda x: x in self.players, self.bet_table.keys())):
                         self._db.insert_bettors(
                             self.players[0][0], self.players[1][0],
                             fight_time, self.bet_table)
 
                 else:
                     if all(map(lambda x: x[1] != 0, self.players)) and fight_time is not None:
-                        self._db.update_odds(self.players[0][0], self.players[1][0],
-                                             self.players[0][1], self.players[1][1],
-                                             fight_time)
-                        log.info("Updated odds: {} ({}) vs. {} ({})".format(
-                            self.players[0][0], self.players[0][1],
-                            self.players[1][0], self.players[1][1]))
+                        db_odds = self._db.get_odds(self.players[0][0], self.players[1][0])
+                        if all([self.players[i][1] != db_odds[i] for i in range(len(self.players))]):
+                            self._db.update_odds(self.players[0][0], self.players[1][0],
+                                                 self.players[0][1], self.players[1][1],
+                                                 fight_time)
+                            log.info("Updated odds: {} ({}) vs. {} ({})".format(
+                                self.players[0][0], self.players[0][1],
+                                self.players[1][0], self.players[1][1]))
                     if all(map(lambda x: x[2] != 0, self.players)) and fight_time is not None:
-                        self._db.update_money(self.players[0][0], self.players[1][0],
-                                              self.players[0][2], self.players[1][2],
-                                              fight_time)
-                        log.info("Updated odds: {} (${:,}) vs. {} (${:,})".format(
-                            self.players[0][0], self.players[0][2],
-                            self.players[1][0], self.players[1][2]))
-                    if self.bet_table and all(map(
-                            lambda x: x in self.players,
-                            self.bet_table.values())) and all(self.bet_table.values()):
+                        db_money = self._db.get_money(self.players[0][0], self.players[1][0])
+                        if all([self.players[i][2] != db_money[i] for i in range(len(self.players))]):
+                            self._db.update_money(self.players[0][0], self.players[1][0],
+                                                  self.players[0][2], self.players[1][2],
+                                                  fight_time)
+                            log.info("Updated money: {} (${:,}) vs. {} (${:,})".format(
+                                self.players[0][0], self.players[0][2],
+                                self.players[1][0], self.players[1][2]))
+                    if self.bet_table and all(map(lambda x: x in self.players, self.bet_table.keys())):
                         if not self._db.bet_table_empty(self.players[0][0],
                                                         self.players[1][0],
                                                         fight_time):
@@ -276,12 +288,12 @@ class SaltBot(object):
                                 fight_time, self.bet_table)
                         log.info("Updated bet table, fight_{}_{}_{}".format(
                             self.players[0][0], self.players[1][0],
-                            dt.strftime(fight_time, '%m-%d-%Y-%M:%S')))
+                            dt.strftime(fight_time, '%m_%d_%Y_%M')))
                     if self.winner is not None:
                         self._db.update_winner(self.players[0][0], self.players[1][0],
                                                fight_time, self.winner)
                         log.info("Updated winner: {}".format(self.winner))
-                old_players = self.players
+                old_players = [self.players[0][0], self.players[1][0]]
                 time.sleep(3)
 
         except KeyboardInterrupt:
@@ -326,6 +338,7 @@ def main(email=None, pwrd=None):
 
 
 if __name__ == "__main__":
+    import sys
     try:
         main(email=sys.argv[1], pwrd=sys.argv[2])
     except IndexError:
