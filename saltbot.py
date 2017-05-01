@@ -18,7 +18,7 @@ from database import betdb
 from selenium.common import exceptions as Except
 from selenium import webdriver
 
-log.basicConfig(filename="saltbot.log", level=log.DEBUG,
+log.basicConfig(filename="saltbot.log", level=log.INFO,
                 format="%(asctime)s [%(levelname)s] :: %(message)s")
 
 
@@ -149,7 +149,7 @@ class SaltBot(object):
                                 if bet.text:
                                     bet_val = int(bet.text.strip()[1:].replace(",", ""))
                         except ValueError:
-                            log.debug("Error on conversion {} {}".format(bet.text, bettor.text))
+                            log.info("Error on conversion {} {}".format(bet.text, bettor.text))
                         self.bet_table[player].append({'bet': bet_val, 'bettor': bettor.text})
             ret = True
         return ret
