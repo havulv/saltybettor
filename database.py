@@ -21,16 +21,16 @@ class betdb(object):
             curs.execute('CREATE TABLE if not exists fights(date text, time '
                          'timestamp, team1 text, team2 text, odds1'
                          ' float, odds2 float, money1 integer, '
-                         'money2 integer)')
+                         'money2 integer, winner text)')
         curs.close()
 
-    def new_fight(self, team1, team2, odds1=0, odds2=0, money1=0, money2=0):
+    def new_fight(self, team1, team2, odds1=0, odds2=0, money1=0, money2=0, winner="None"):
         date = dt.today()
         curs = self.conn.cursor()
         curs.execute('insert into fights(date, time, team1, '
-                     'team2) values (?, ?, ?, ?, ?, ?, ?, ?)',
+                     'team2) values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                      date, date, team1.strip(), team2.strip(),
-                     odds1, odds2, money1, money2)
+                     odds1, odds2, money1, money2, winner)
         curs.close()
         self.create_bettor_table(team1, team2, date)
         return date
@@ -53,22 +53,32 @@ class betdb(object):
         curs.close()
         return ret
 
-    def update_odds(self, team1, team2, odds1, odds2):
+    def update_odds(self, team1, team2, odds1, odds2, date):
         curs = self.conn.cursor()
         curs.execute("update fights set odds1 = :od1, "
                      "odds2 = :od2 where team1 = ':tm1'"
-                     " and team2 = ':tm2'",
+                     " and team2 = ':tm2' and date:date",
                      {"tm1": team1.strip(), "tm2": team2.strip(),
-                      "od1": odds1, "od2": odds2})
+                      "od1": odds1, "od2": odds2, "date": date})
         curs.close()
 
-    def update_money(self, team1, team2, money1, money2):
+    def update_money(self, team1, team2, money1, money2, date):
         curs = self.conn.cursor()
         curs.execute('update fights set money1=:money1, '
                      "money2=:money2 where team1=':team1' "
-                     " and team2=':team2'",
+                     " and team2=':team2' and date=:date",
                      {"team1": team1, "team2": team2,
-                      "money1": money1, "money2": money2})
+                      "money1": money1, "money2": money2,
+                      "date": date})
+        curs.close()
+
+    def update_winner(self, team1, team2, date, winner):
+        curs = self.conn.cursor()
+        curs.execute('update fights set winner=:win '
+                     'where team1=:tm1 and team2=:tm2'
+                     ' and date=:dt',
+                     {"dt": date, "tm1": team1,
+                      "tm2": team2, "win": winner})
         curs.close()
 
     def update_bet(self, team1, team2, date, team, bettor, bet):
