@@ -282,7 +282,7 @@ class SaltBot(object):
                                                fight_time, self.winner)
                         log.info("Updated winner: {}".format(self.winner))
                 old_players = self.players
-                time.sleep(2)
+                time.sleep(3)
 
         except KeyboardInterrupt:
             log.info("Keyboard close")
@@ -293,11 +293,11 @@ class SaltBot(object):
             while True:
                 for func in [self.update_bettors, self.update_players,
                              self.update_money, self.update_bets_for,
-                             self.update_odds]:
+                             self.update_odds, self.update_winner]:
                     log.info("Running {}".format(func.__name__))
                     log.info("Successful") if func() else log.info("Failed")
                     log.debug(self.players)
-                time.sleep(5)
+                time.sleep(3)
         except KeyboardInterrupt:
             log.info("Keyboard close")
             print("Cleaning up")
