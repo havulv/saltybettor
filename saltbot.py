@@ -15,6 +15,8 @@ from database import betdb
 from selenium import webdriver
 from selenium.common import exceptions as Except
 
+import numpy as np
+
 log.basicConfig(filename="saltbot.log", level=log.INFO,
                 format="%(asctime)s [%(levelname)s] :: %(message)s")
 
@@ -38,6 +40,10 @@ class SaltBot(object):
             raise Exception("AuthenticationError")
         self._db = betdb()
         self._db.create_fight_table()
+        self.odds_table = np.zeros((2, 2), float)
+        self.win_table = np.zeros((2, 2), int)
+        self.fighters = []
+        self.fights = np.zeros((1,2), int)
 
     def _driver_init(self, driver):
         avail = [(webdriver.Chrome, "Chrome"),
@@ -233,6 +239,31 @@ class SaltBot(object):
             sent = True
         return sent
 
+    def load(self):
+        fights = self._db.get_all_fights()
+        if fights is not None:
+            self.fighters = list(set([k for j in [(i[0], i[1]) for i in fights] for k in j]))
+            total_fighters = len(self.fighters)
+
+            self.odds_table.shape = (total_fighters, total_fighters)
+            self.win_table.shape = (total_fighters, total_fighters)
+            self.fights.shape = (1, total_fighters)
+
+            while len(fights) > 0:
+                t1, t2, o1, o2, win = fights.pop()
+                for i, mug in enumerate(self.fighters):
+                    if mug == win:
+                        loser = t1 if win == t2 else t2
+                        self.win_table[i, self.fighters.index(loser)] += 1
+                high = t1 if o2 == 1 else t2
+                low = t2 if high == t1 else t1
+                self.odds_table[self.fighters.index(high), self.fighters.index(low)] += o2 if o1 == 1 else o2
+
+            # Compute average odds
+            self.fights = np.sum(self.win_table, axis=0) + np.sum(self.win_table, axis=1)
+            np.apply_along_axis(lambda x: list(map(lambda i: x[i] / self.fights[i],
+                                                   range(total_fighters))), axis=0, arr=self.odds_table)
+
     def record(self):
         updates = [self.update_bettors, self.update_players,
                    self.update_money, self.update_bets_for,
@@ -255,18 +286,42 @@ class SaltBot(object):
                 if old_players[0] != self.players[0][0] and old_players[1] != self.players[1][0]:
                     fight_time = self._db.new_fight(self.players[0][0], self.players[1][0])
                     log.info("New players: {}".format(" vs. ".join([i[0] for i in self.players])))
+
                     if self.bet_table and all(map(lambda x: x in self.players, self.bet_table.keys())):
+
                         self._db.insert_bettors(
                             self.players[0][0], self.players[1][0],
                             fight_time, self.bet_table)
 
+                        if self.players[0][0] not in self.fighters:
+                            self.fighters.append(self.players[0][0])
+                            np.append(self.fights, 1)
+                        else:
+                            self.fights[0, self.fighters.index(self.players[0][0])]
+
+                        if self.players[1][0] not in self.fighters:
+                            self.fighters.append(self.players[1][0])
+                            np.append(self.fights, 1)
+                        else:
+                            self.fights[0, self.fighters.index(self.players[1][0])]
+
                 else:
                     if all(map(lambda x: x[1] != 0, self.players)) and fight_time is not None:
                         db_odds = self._db.get_odds(self.players[0][0], self.players[1][0])
+
                         if all([self.players[i][1] != db_odds[i] for i in range(len(self.players))]):
+
                             self._db.update_odds(self.players[0][0], self.players[1][0],
                                                  self.players[0][1], self.players[1][1],
                                                  fight_time)
+
+                            ### FIXME: THE FIGHTS TABLE HAS TO BE UPPER TRIANGULAR
+                            odds = self.players[0][1] if self.players[1][1] == 1 else self.players[1][1]
+                            high = self.players[0][0] if self.players[1][1] == 1 else self.players[1][0]
+                            low = self.players[0][0] if high == self.players[1][0] else self.players[1][0]
+                            i1 = self.fighters.index(high)
+                            i2 = self.fighters.index(low)
+                            self.odds_table[i1, i2] = odds * (1 / (self.fights[i
                             log.info("Updated odds: {} ({}) vs. {} ({})".format(
                                 self.players[0][0], self.players[0][1],
                                 self.players[1][0], self.players[1][1]))
