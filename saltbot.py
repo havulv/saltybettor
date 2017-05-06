@@ -21,6 +21,16 @@ log.basicConfig(filename="saltbot.log", level=log.INFO,
                 format="%(asctime)s [%(levelname)s] :: %(message)s")
 
 
+class Log(object):
+    def write(self, msg):
+        log.info(msg)
+
+
+nplog = Log()
+np.seterrcall(nplog)
+np.seterr(all='log')
+
+
 class SaltBot(object):
 
     auth = False
@@ -42,8 +52,17 @@ class SaltBot(object):
         self._db.create_fight_table()
         self.odds_table = np.zeros((2, 2), float)
         self.win_table = np.zeros((2, 2), int)
+        self.avg_odds_table = np.zeros((2, 2), float)
         self.fighters = []
-        self.fights = np.zeros((1,2), int)
+        self.fights = np.zeros((2, 2), int)
+
+    # Expands in place
+    def _expand(self, arr, shape):
+        while arr.shape[1] < shape[1]:
+            arr = np.concatenate((arr, [[0] for i in range(arr.shape[0])]), axis=1)
+        while arr.shape[0] < shape[0]:
+            arr = np.concatenate((arr, [[0 for i in range(arr.shape[1])]]), axis=0)
+        return arr
 
     def _driver_init(self, driver):
         avail = [(webdriver.Chrome, "Chrome"),
@@ -240,14 +259,16 @@ class SaltBot(object):
         return sent
 
     def load(self):
+        success = False
         fights = self._db.get_all_fights()
         if fights is not None:
             self.fighters = list(set([k for j in [(i[0], i[1]) for i in fights] for k in j]))
             total_fighters = len(self.fighters)
 
-            self.odds_table.shape = (total_fighters, total_fighters)
-            self.win_table.shape = (total_fighters, total_fighters)
-            self.fights.shape = (1, total_fighters)
+            self.odds_table = np.zeros((total_fighters, total_fighters))
+            self.win_table = np.zeros((total_fighters, total_fighters))
+            self.fights = np.zeros((total_fighters, total_fighters))
+            self.avg_odds_table = np.zeros((total_fighters, total_fighters))
 
             while len(fights) > 0:
                 t1, t2, o1, o2, win = fights.pop()
@@ -258,11 +279,53 @@ class SaltBot(object):
                 high = t1 if o2 == 1 else t2
                 low = t2 if high == t1 else t1
                 self.odds_table[self.fighters.index(high), self.fighters.index(low)] += o2 if o1 == 1 else o2
+                self.odds_table[self.fighters.index(low), self.fighters.index(high)] += o2 if o2 == 1 else o1
 
             # Compute average odds
-            self.fights = np.sum(self.win_table, axis=0) + np.sum(self.win_table, axis=1)
-            np.apply_along_axis(lambda x: list(map(lambda i: x[i] / self.fights[i],
-                                                   range(total_fighters))), axis=0, arr=self.odds_table)
+            self.fights = np.matrix([[self.win_table[j, i] +
+                                      self.win_table[i, j] + 1 for j in
+                                      range(self.win_table.shape[0])]
+                                     for i in range(self.win_table.shape[1])])
+
+            self.avg_odds_table = np.triu(np.divide(self.odds_table, self.fights))
+            success = True
+        return success
+
+    def get_fights(self, player1, player2):
+        return self.fights[self.fighters.index(player1), self.fighters.index(player2)]
+
+    def get_wins(self, player1, player2):
+        return self.win_table[self.fighters.index(player1), self.fighters.index(player2)]
+
+    def get_cumm_odds(self, player1, player2):
+        return self.odds_table[self.fighters.index(player1), self.fighters.index(player2)]
+
+    def get_avg_odds(self, player1, player2):
+        return self.avg_odds_table[self.fighters.index(player1), self.fighters.index(player2)]
+
+    def append_fighters(self, player):
+        if player not in self.fighters:
+            self.fighters.append(player)
+            self._expand(
+                self.fights,
+                (self.fights.shape[0] + 2, self.fights.shape[1] + 2))
+            self._expand(
+                self.win_table,
+                (self.win_table.shape[0] + 2, self.win_table.shape[1] + 2))
+            self._expand(
+                self.odds_table,
+                (self.odds_table.shape[0] + 2, self.odds_table.shape[1] + 2))
+            self._expand(
+                self.avg_odds_table,
+                (self.avg_odds_table.shape[0] + 2, self.avg_odds_table.shape[1] + 2))
+            print(self.fights.shape)
+            print(self.win_table.shape)
+            print(self.odds_table.shape)
+            print(self.avg_odds_table.shape)
+        print(self.fights.shape)
+        print(self.win_table.shape)
+        print(self.odds_table.shape)
+        print(self.avg_odds_table.shape)
 
     def record(self):
         updates = [self.update_bettors, self.update_players,
@@ -287,23 +350,22 @@ class SaltBot(object):
                     fight_time = self._db.new_fight(self.players[0][0], self.players[1][0])
                     log.info("New players: {}".format(" vs. ".join([i[0] for i in self.players])))
 
+                    self.append_fighters(self.players[0][0])
+                    self.append_fighters(self.players[1][0])
+
+                    hi = self.fighters.index(self.players[0][0])
+                    lo = self.fighters.index(self.players[1][0])
+
+                    print(self.fights.shape)
+                    print(len(self.fighters))
+                    self.fights[hi, lo] += 1
+                    self.fights[lo, hi] += 1
+
                     if self.bet_table and all(map(lambda x: x in self.players, self.bet_table.keys())):
 
                         self._db.insert_bettors(
                             self.players[0][0], self.players[1][0],
                             fight_time, self.bet_table)
-
-                        if self.players[0][0] not in self.fighters:
-                            self.fighters.append(self.players[0][0])
-                            np.append(self.fights, 1)
-                        else:
-                            self.fights[0, self.fighters.index(self.players[0][0])]
-
-                        if self.players[1][0] not in self.fighters:
-                            self.fighters.append(self.players[1][0])
-                            np.append(self.fights, 1)
-                        else:
-                            self.fights[0, self.fighters.index(self.players[1][0])]
 
                 else:
                     if all(map(lambda x: x[1] != 0, self.players)) and fight_time is not None:
@@ -315,25 +377,36 @@ class SaltBot(object):
                                                  self.players[0][1], self.players[1][1],
                                                  fight_time)
 
-                            ### FIXME: THE FIGHTS TABLE HAS TO BE UPPER TRIANGULAR
+                            self.append_fighters(self.players[0][0])
+                            self.append_fighters(self.players[1][0])
+
                             odds = self.players[0][1] if self.players[1][1] == 1 else self.players[1][1]
-                            high = self.players[0][0] if self.players[1][1] == 1 else self.players[1][0]
-                            low = self.players[0][0] if high == self.players[1][0] else self.players[1][0]
-                            i1 = self.fighters.index(high)
-                            i2 = self.fighters.index(low)
-                            self.odds_table[i1, i2] = odds * (1 / (self.fights[i
+                            i1 = self.fighters.index(
+                                self.players[0][0] if self.players[1][1] == 1 else self.players[1][0])
+                            i2 = self.fighters.index(
+                                self.players[0][0] if self.players[0][0] == 1 else self.players[1][0])
+
+                            self.odds_table[i1, i2] += odds
+                            self.avg_odds_table[i1, i2] = self.odds_table[i1, i2] / self.fights[i1, i2]
+                            self.avg_odds_table[i2, i1] = self.odds_table[i1, i2] / self.fights[i1, i2]
+
                             log.info("Updated odds: {} ({}) vs. {} ({})".format(
                                 self.players[0][0], self.players[0][1],
                                 self.players[1][0], self.players[1][1]))
+
                     if all(map(lambda x: x[2] != 0, self.players)) and fight_time is not None:
                         db_money = self._db.get_money(self.players[0][0], self.players[1][0])
+
                         if all([self.players[i][2] != db_money[i] for i in range(len(self.players))]):
+
                             self._db.update_money(self.players[0][0], self.players[1][0],
                                                   self.players[0][2], self.players[1][2],
                                                   fight_time)
+
                             log.info("Updated money: {} (${:,}) vs. {} (${:,})".format(
                                 self.players[0][0], self.players[0][2],
                                 self.players[1][0], self.players[1][2]))
+
                     if self.bet_table and all(map(lambda x: x in self.players, self.bet_table.keys())):
                         if not self._db.bet_table_empty(self.players[0][0],
                                                         self.players[1][0],
@@ -341,14 +414,42 @@ class SaltBot(object):
                             self._db.insert_bettors(
                                 self.players[0][0], self.players[1][0],
                                 fight_time, self.bet_table)
+
                         log.info("Updated bet table, fight_{}_{}_{}".format(
                             self.players[0][0], self.players[1][0],
                             dt.strftime(fight_time, '%m_%d_%Y_%M')))
+
                     if self.winner is not None:
                         self._db.update_winner(self.players[0][0], self.players[1][0],
                                                fight_time, self.winner)
+                        try:
+                            i1 = self.fighters.index(self.winner)
+                            i2 = self.fighters.index(
+                                self.players[0][0] if self.winner == self.players[1][0] else self.players[1][0])
+
+                            self.win_table[i1, i2] += 1
+                        except ValueError:
+                            pass  # fuck it
+
                         log.info("Updated winner: {}".format(self.winner))
+
                 old_players = [self.players[0][0], self.players[1][0]]
+
+                if fight_time is not None:
+                    try:
+                        print("{} wins: ".format(self.players[0][0]), end='')
+                        print(self.get_wins(*[i[0] for i in self.players]))
+                        print("{} wins: ".format(self.players[1][0]), end='')
+                        print(self.get_wins(*[i[0] for i in reversed(self.players)]))
+                        print("Total fights: ", end='')
+                        print(self.get_fights(*[i[0] for i in self.players]))
+                        print("Cummulative odds for {}: ".format(self.players[0][1]), end='')
+                        print(self.get_cumm_odds(*[i[0] for i in self.players]))
+                        print("Average odds for {}: ".format(self.players[0][1]), end='')
+                        print(self.get_avg_odds(*[i[0] for i in self.players]))
+                    except ValueError:
+                        print("Not valid fighters: {}".format(", ".join([i[0] for i in self.players])))
+
                 time.sleep(3)
 
         except KeyboardInterrupt:
@@ -389,6 +490,10 @@ def main(email=None, pwrd=None):
     if drive == "no":
         drive = None
     salt_bot = SaltBot(get_credentials(), driver=drive)
+
+    if salt_bot.load():
+        print("Database loaded into memory")
+
     salt_bot.record()
 
 
