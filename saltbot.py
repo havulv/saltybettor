@@ -426,8 +426,11 @@ class SaltBot(object):
 
             self.odds_table[i1, i2] += odds
             self.odds_table[i2, i1] += 1
-            self.avg_odds_table[i1, i2] = self.odds_table[i1, i2] / self.fights[i1, i2]
-            self.avg_odds_table[i2, i1] = self.odds_table[i2, i1] / self.fights[i2, i1]
+            for x, y in zip([i1, i2], [i2, i1]):
+                if self.fights[x, y] != 0:
+                    self.avg_odds_table[x, y] = self.odds_table[x, y] / self.fights[x, y]
+                else:
+                    self.avg_odds_table[x, y] = 0
 
             log.info("Updated odds: {} ({}) vs. {} ({})".format(
                 self.players[0][0], self.players[0][1],
