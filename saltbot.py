@@ -23,6 +23,7 @@ log.basicConfig(filename="saltbot.log", level=log.INFO,
 
 def keyboardwrap(func):
     def wrapper(*args, **kwargs):
+        ret = None
         try:
             ret = func(*args, **kwargs)
         except KeyboardInterrupt:
@@ -474,7 +475,7 @@ class SaltBot(object):
             self.players[0][0], self.players[1][0],
             dt.strftime(fight_time, '%m_%d_%Y_%M')))
 
-    def _validate_players(self):
+    def _validate_players(self, old_players, fight_time):
         if all(map(lambda x: x is not None, [i[0] for i in self.players])):
             try:
                 int(self.players[0][0])
@@ -503,16 +504,21 @@ class SaltBot(object):
             for i in updates:
                 update_arr[i.__name__] = i()
 
-            log.debug("Updated members:\n{}".format(" ".join(
+            log.debug("Updated members: {}".format(" ".join(
                 ["{}: {}".format(i, j) for i, j
                  in update_arr.items()])))
 
+            log.debug("Fight Time: {}".format(
+                "None" if fight_time is None
+                else dt.strftime(fight_time, '%m_%d_%Y_%M')))
+
             log.debug("Checking database writes")
-            old_players, fight_time = self._validate_players()
+            old_players, fight_time = self._validate_players(
+                old_players, fight_time)
 
             if all(map(lambda x: old_players[x] != self.players[x][0],
                        range(2))):
-                self.create_fight()
+                fight_time = self.create_fight()
             else:
                 if fight_time is not None and \
                         all(map(lambda x: x[1] != 0,
@@ -572,6 +578,7 @@ def main(email=None, pwrd=None):
 
     if salt_bot.load():
         print("Database loaded into memory")
+        log.info("Database loaded into memory")
 
     salt_bot.record()
 
