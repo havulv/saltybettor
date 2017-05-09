@@ -8,39 +8,24 @@
 '''
 
 import time
+import numpy as np
 import logging as log
+import threading
 from datetime import datetime as dt
 from bs4 import BeautifulSoup as bs
-from database import betdb
 from selenium import webdriver
 from selenium.common import exceptions as Except
 
-import numpy as np
-
-log.basicConfig(filename="saltbot.log", level=log.INFO,
-                format="%(asctime)s [%(levelname)s] :: %(message)s")
-
-
-def keyboardwrap(func):
-    def wrapper(*args, **kwargs):
-        ret = None
-        try:
-            ret = func(*args, **kwargs)
-        except KeyboardInterrupt:
-            log.info("Keyboard quit out")
-            print("Cleaning up")
-        return ret
-    return wrapper
-
-
-class Log(object):
-    def write(self, msg):
-        log.info(msg)
-
+from .database import betdb
+from .exceptions import AuthenticationError
+from .helpers import Log, keyboardwrap
 
 nplog = Log()
 np.seterrcall(nplog)
 np.seterr(all='log')
+
+log.basicConfig(filename="saltbot.log", level=log.INFO,
+                format="%(asctime)s [%(levelname)s] :: %(message)s")
 
 
 class SaltBot(object):
@@ -59,14 +44,22 @@ class SaltBot(object):
             log.info("Authorized")
             del credentials
         else:
-            raise Exception("AuthenticationError")
+            raise AuthenticationError
         self._db = betdb()
         self._db.create_fight_table()
+        self._data_lock = threading.Lock()
         self.odds_table = np.zeros((2, 2), float)
         self.win_table = np.zeros((2, 2), int)
         self.avg_odds_table = np.zeros((2, 2), float)
         self.fighters = []
         self.fights = np.zeros((2, 2), int)
+
+    def _resource_lock(func):
+        def wrap(self, *args, **kwargs):
+            with self._data_lock:
+                ret = func(self, *args, **kwargs)
+            return ret
+        return wrap
 
     # Expands in place
     def _expand(self, arr, shape):
@@ -289,6 +282,7 @@ class SaltBot(object):
             sent = True
         return sent
 
+    @_resource_lock
     def load(self):
         success = False
         fights = self._db.get_all_fights()
@@ -340,6 +334,7 @@ class SaltBot(object):
                   range(self.odds_table.shape[0])]
                  for i in range(self.odds_table.shape[1])])
             success = True
+        log.info("Database loaded into memory")
         return success
 
     def get_fights(self, player1, player2):
@@ -378,6 +373,7 @@ class SaltBot(object):
                 (self.avg_odds_table.shape[0] + 1,
                  self.avg_odds_table.shape[1] + 1))
 
+    @_resource_lock
     def create_fight(self):
         fight_time = self._db.new_fight(self.players[0][0],
                                         self.players[1][0])
@@ -401,6 +397,7 @@ class SaltBot(object):
 
         return fight_time
 
+    @_resource_lock
     def create_odds(self, fight_time):
         db_odds = self._db.get_odds(self.players[0][0],
                                     self.players[1][0])
@@ -436,6 +433,7 @@ class SaltBot(object):
                 self.players[0][0], self.players[0][1],
                 self.players[1][0], self.players[1][1]))
 
+    @_resource_lock
     def create_money(self, fight_time):
         db_money = self._db.get_money(self.players[0][0],
                                       self.players[1][0])
@@ -450,6 +448,7 @@ class SaltBot(object):
                 self.players[0][0], self.players[0][2],
                 self.players[1][0], self.players[1][2]))
 
+    @_resource_lock
     def create_winner(self, fight_time):
         self._db.update_winner(self.players[0][0], self.players[1][0],
                                fight_time, self.winner)
@@ -466,6 +465,7 @@ class SaltBot(object):
 
         log.info("Updated winner: {}".format(self.winner))
 
+    @_resource_lock
     def create_bet_table(self, fight_time):
         if not self._db.bet_table_empty(self.players[0][0],
                                         self.players[1][0],
@@ -557,38 +557,3 @@ class SaltBot(object):
         except KeyboardInterrupt:
             log.info("Keyboard close")
             print("Cleaning up")
-
-
-# This is for preliminary testing, change in the future
-def get_credentials():
-    '''
-        Returns the credentials of the user, whether stored somewhere
-            on the machine or entered by hand.
-
-        returns
-            credentials -> type == dictionary
-    '''
-    email = input("email: ")
-    passwd = input("password: ")
-    return {"email": email, "pword": passwd}
-
-
-def main(email=None, pwrd=None):
-    drive = input("Specific driver? ")
-    if drive == "no":
-        drive = None
-    salt_bot = SaltBot(get_credentials(), driver=drive)
-
-    if salt_bot.load():
-        print("Database loaded into memory")
-        log.info("Database loaded into memory")
-
-    salt_bot.record()
-
-
-if __name__ == "__main__":
-    import sys
-    try:
-        main(email=sys.argv[1], pwrd=sys.argv[2])
-    except IndexError:
-        main()
