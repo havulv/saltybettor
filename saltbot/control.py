@@ -13,7 +13,6 @@ import sys
 
 
 def main(email=None, pwrd=None):
-    print("This is where the main control commands will go")
     drive = input("Specific driver? ")
     if drive == "no":
         drive = None
@@ -25,8 +24,6 @@ def main(email=None, pwrd=None):
         creds = get_credentials()
 
     salt_bot = SaltBot(creds, driver=drive)
-
-    sys.exit()
 
     if salt_bot.load():
         print("Database loaded into memory")
