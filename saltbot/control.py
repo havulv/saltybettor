@@ -9,7 +9,14 @@ Main file for controling the bot
 
 from .saltbot import SaltBot
 from .helpers import get_credentials
+import threading
 import sys
+
+
+def main_thread(bot):
+    if bot.load():
+        print("Database loaded into memory")
+    bot.record()
 
 
 def main(email=None, pwrd=None):
@@ -25,7 +32,6 @@ def main(email=None, pwrd=None):
 
     salt_bot = SaltBot(creds, driver=drive)
 
-    if salt_bot.load():
-        print("Database loaded into memory")
-
-    salt_bot.record()
+    main_loop = threading.Thread(target=main_thread, args=(salt_bot,))
+    main_loop.start()
+    main_loop.join()
