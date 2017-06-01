@@ -15,8 +15,6 @@ from database import betdb
 from selenium import webdriver
 from selenium.common import exceptions as Except
 
-import numpy as np
-
 log.basicConfig(filename="saltbot.log", level=log.INFO,
                 format="%(asctime)s [%(levelname)s] :: %(message)s")
 
@@ -39,16 +37,6 @@ def keyboardwrap(func):
             print("Cleaning up")
         return ret
     return wrapper
-
-
-class Log(object):
-    def write(self, msg):
-        log.info(msg)
-
-
-nplog = Log()
-np.seterrcall(nplog)
-np.seterr(all='log')
 
 
 class SaltBot(object):
@@ -74,19 +62,6 @@ class SaltBot(object):
         self.win_dict = {}
         self.avg_odds_dict = {}
         self.fighters = []
-        self.fights = np.zeros((2, 2), int)
-
-    # Expands in place
-    def _expand(self, arr, shape):
-        if arr.shape[0] in [0, 1] and arr.shape[1] in [0, 1]:
-            arr = np.zeros((1, 1))
-        while arr.shape[1] < shape[1]:
-            arr = np.concatenate(
-                (arr, [[0] for i in range(arr.shape[0])]), axis=1)
-        while arr.shape[0] < shape[0]:
-            arr = np.concatenate(
-                (arr, [[0 for i in range(arr.shape[1])]]), axis=0)
-        return arr
 
     def _driver_init(self, driver):
         avail = [(webdriver.Chrome, "Chrome"),
