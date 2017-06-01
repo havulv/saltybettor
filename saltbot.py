@@ -21,6 +21,14 @@ log.basicConfig(filename="saltbot.log", level=log.INFO,
                 format="%(asctime)s [%(levelname)s] :: %(message)s")
 
 
+def l_strcmp(str1, str2):
+    end = len(str1) if len(str1) < len(str2) else len(str2)
+    for i, j in zip(str1[:end], str2[:end]):
+        if i != j:
+            return False
+    return True
+
+
 def keyboardwrap(func):
     def wrapper(*args, **kwargs):
         ret = None
@@ -62,9 +70,9 @@ class SaltBot(object):
             raise Exception("AuthenticationError")
         self._db = betdb()
         self._db.create_fight_table()
-        self.odds_table = np.zeros((2, 2), float)
-        self.win_table = np.zeros((2, 2), int)
-        self.avg_odds_table = np.zeros((2, 2), float)
+        self.odds_dict = {}
+        self.win_dict = {}
+        self.avg_odds_dict = {}
         self.fighters = []
         self.fights = np.zeros((2, 2), int)
 
@@ -295,88 +303,60 @@ class SaltBot(object):
         if fights is not None:
             self.fighters = list(set(
                 [k for j in [(i[0], i[1]) for i in fights] for k in j]))
-            total_fighters = len(self.fighters)
 
-            self.odds_table = np.zeros((total_fighters, total_fighters))
-            self.win_table = np.zeros((total_fighters, total_fighters))
-            self.fights = np.zeros((total_fighters, total_fighters))
-            self.avg_odds_table = np.zeros((total_fighters, total_fighters))
+            self.odds_dict = {fighter: {} for fighter in self.fighters}
+            self.win_dict = {fighter: {} for fighter in self.fighters}
+            self.fight_dict = {fighter: 0 for fighter in self.fighters}
+            self.avg_odds_dict = {fighter: 0 for fighter in self.fighters}
 
             while len(fights) > 0:
                 t1, t2, o1, o2, win = fights.pop()
-                for i, mug in enumerate(self.fighters):
-                    if mug == win:
-                        loser = t1 if win == t2 else t2
-                        self.win_table[i, self.fighters.index(loser)] += 1
-                if o1 == 1:
-                    self.odds_table[self.fighters.index(t2),
-                                    self.fighters.index(t1)] += o2
-                    self.odds_table[self.fighters.index(t1),
-                                    self.fighters.index(t2)] += o1
-                else:
-                    self.odds_table[self.fighters.index(t2),
-                                    self.fighters.index(t1)] += o1
-                    self.odds_table[self.fighters.index(t1),
-                                    self.fighters.index(t2)] += o2
+                loser = t1 if win == t2 else t2
+                self.fight_dict[loser] += 1
+                self.fight_dict[win] += 1
+                for i, j in zip([self.win_dict, self.odds_dict, self.odds_dict],
+                                [(win, loser, 1), (t1, t2, o1), (t2, t1, o2)]):
+                    if i[j[0]].get(j[1]) is not None:
+                        i[j[0]][j[1]] += j[2]
+                    else:
+                        i[j[0]][j[1]] = j[2]
 
             # Compute average odds
-            self.fights = np.matrix(
-                [[self.win_table[j, i] +
-                  self.win_table[i, j] for j in
-                  range(self.win_table.shape[0])]
-                 for i in range(self.win_table.shape[1])])
+            for fighter in self.fighters:
+                self.avg_odds_dict[fighter] = sum(self.odds_dict[fighter].values()) / self.fight_dict[fighter]
 
-            if self.fights.shape[0] != self.fights.shape[1]:
-                if self.fights.shape[0] < self.fights.shape[1]:
-                    hi = self.fights.shape[0]
-                else:
-                    hi = self.fights.shape[1]
-                self.fights.shape = (hi, hi)
-
-            self.avg_odds_table = np.matrix(
-                [[self.odds_table[i, j] /
-                  self.fights[i, j] if self.fights[i, j] != 0
-                  else 0 for j in
-                  range(self.odds_table.shape[0])]
-                 for i in range(self.odds_table.shape[1])])
             success = True
         return success
 
-    def get_fights(self, player1, player2):
-        return self.fights[self.fighters.index(player1),
-                           self.fighters.index(player2)]
-
     def get_wins(self, player1, player2):
-        return self.win_table[self.fighters.index(player1),
-                              self.fighters.index(player2)]
+        return (sum(self.win_dict[player1].values)
+                if self.win_dict.get(player1) is not None else None,
+                sum(self.win_dict[player2].values)
+                if self.win_dict.get(player2) is not None else None)
 
     def get_cumm_odds(self, player1, player2):
-        return self.odds_table[self.fighters.index(player1),
-                               self.fighters.index(player2)]
+        return (sum(self.odds_dict[player1].values)
+                if self.odds_dict.get(player1) is not None else None,
+                sum(self.odds_dict[player2].values)
+                if self.odds_dict.get(player2) is not None else None)
 
     def get_avg_odds(self, player1, player2):
-        return self.avg_odds_table[self.fighters.index(player1),
-                                   self.fighters.index(player2)]
+        return (sum(self.avg_odds_dict[player1].values)
+                if self.avg_odds_dict.get(player1) is not None else None,
+                sum(self.avg_odds_dict[player2].values)
+                if self.avg_odds_dict.get(player2) is not None else None)
 
     def append_fighters(self, player):
         if player not in self.fighters:
             self.fighters.append(player)
-            self.fights = self._expand(
-                self.fights,
-                (self.fights.shape[0] + 1,
-                 self.fights.shape[1] + 1))
-            self.win_table = self._expand(
-                self.win_table,
-                (self.win_table.shape[0] + 1,
-                 self.win_table.shape[1] + 1))
-            self.odds_table = self._expand(
-                self.odds_table,
-                (self.odds_table.shape[0] + 1,
-                 self.odds_table.shape[1] + 1))
-            self.avg_odds_table = self._expand(
-                self.avg_odds_table,
-                (self.avg_odds_table.shape[0] + 1,
-                 self.avg_odds_table.shape[1] + 1))
+
+        for i, j in zip([self.fight_dict, self.odds_dict, self.avg_odds_dict],
+                        [0, {}, 0]):
+            if i.get(player) is None:
+                i[player] = j
+            else:
+                if j != {}:
+                    i[player] += j
 
     def create_fight(self):
         fight_time = self._db.new_fight(self.players[0][0],
@@ -387,11 +367,8 @@ class SaltBot(object):
         self.append_fighters(self.players[0][0])
         self.append_fighters(self.players[1][0])
 
-        hi = self.fighters.index(self.players[0][0])
-        lo = self.fighters.index(self.players[1][0])
-
-        self.fights[hi, lo] += 1
-        self.fights[lo, hi] += 1
+        self.fight_dict[self.players[0][0]] += 1
+        self.fight_dict[self.players[1][0]] += 1
 
         if self.bet_table and all(map(lambda x: x in self.players,
                                       self.bet_table.keys())):
@@ -412,25 +389,15 @@ class SaltBot(object):
                                  self.players[0][1], self.players[1][1],
                                  fight_time)
 
-            self.append_fighters(self.players[0][0])
-            self.append_fighters(self.players[1][0])
-
-            if self.players[1][1] == 1:
-                odds = self.players[0][1]
-                i1 = self.fighters.index(self.players[0][0])
-                i2 = self.fighters.index(self.players[0][0])
+            if self.odds_dict.get(self.players[0][0]) is None:
+                self.odds_dict[self.players[0][0]] = {self.players[1][0]: self.players[1][1]}
             else:
-                odds = self.players[1][1]
-                i1 = self.fighters.index(self.players[1][0])
-                i2 = self.fighters.index(self.players[1][0])
+                self.odds_dict[self.players[0][0]][self.players[1][0]] += self.players[0][1]
 
-            self.odds_table[i1, i2] += odds
-            self.odds_table[i2, i1] += 1
-            for x, y in zip([i1, i2], [i2, i1]):
-                if self.fights[x, y] != 0:
-                    self.avg_odds_table[x, y] = self.odds_table[x, y] / self.fights[x, y]
-                else:
-                    self.avg_odds_table[x, y] = 0
+            if self.odds_dict.get(self.players[1][0]) is None:
+                self.odds_dict[self.players[1][0]] = {self.players[0][0]: self.players[0][1]}
+            else:
+                self.odds_dict[self.players[1][0]][self.players[0][1]] += self.players[1][1]
 
             log.info("Updated odds: {} ({}) vs. {} ({})".format(
                 self.players[0][0], self.players[0][1],
@@ -453,16 +420,17 @@ class SaltBot(object):
     def create_winner(self, fight_time):
         self._db.update_winner(self.players[0][0], self.players[1][0],
                                fight_time, self.winner)
-        try:
-            i1 = self.fighters.index(self.winner)
-            if self.winner == self.players[1][0]:
-                i2 = self.fighters.index(self.players[0][0])
-            else:
-                i2 = self.fighters.index(self.players[1][0])
 
-            self.win_table[i1, i2] += 1
-        except ValueError:
-            pass  # fuck it
+        if l_strcmp(self.winner, self.players[1][0]):
+            if self.win_dict[self.players[1][0]].get([self.players[0][0]]) is None:
+                self.win_dict[self.players[1][0]][self.players[0][0]] = 1
+            else:
+                self.win_dict[self.players[1][0]][self.players[0][0]] += 1
+        else:
+            if self.win_dict[self.players[0][0]].get([self.players[1][0]]) is None:
+                self.win_dict[self.players[0][0]][self.players[1][0]] = 1
+            else:
+                self.win_dict[self.players[0][0]][self.players[1][0]] += 1
 
         log.info("Updated winner: {}".format(self.winner))
 
