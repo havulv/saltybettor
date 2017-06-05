@@ -10,14 +10,16 @@ from datetime import datetime as dt
 #      passed around instead of opening and closing one constantly
 class access(object):
 
-    def __init__(self):
+    def __init__(self, dbname):
         self.dbase = sqlite3
+        self.dbname = dbname
+        self.conn = self.dbase.connect(self.dbname, detect_types=sqlite3.PARSE_DECLTYPES)
 
-    def __with__(self, db):
-        return self.dbase.connect(db)
+    def __enter__(self):
+        return self.conn
 
-    def __exit__(self):
-        self.dbase.close()
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.conn.close()
 
 
 class betdb(object):
@@ -32,20 +34,20 @@ class betdb(object):
                          "type='table' and name=:tble",
                          {'tble': "'fights'"})
             if curs.fetchone() is None:
-                curs.execute('CREATE TABLE if not exists fights(date text, time '
+                curs.execute('CREATE TABLE if not exists fights(time '
                              'timestamp, team1 text, team2 text, odds1'
                              ' real, odds2 real, money1 integer, '
                              'money2 integer, winner text)')
                 conn.commit()
 
     def new_fight(self, team1, team2, odds1=0, odds2=0, money1=0, money2=0, winner="None"):
-        date = dt.today()
+        date = dt.now()
         with access("bet.db") as conn:
             curs = conn.cursor()
-            curs.execute('insert into fights(date, time, team1, '
+            curs.execute('insert into fights(time, team1, '
                          'team2, odds1, odds2, money1, money2, winner) '
-                         'values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                         (date, date, team1.strip(), team2.strip(),
+                         'values (?, ?, ?, ?, ?, ?, ?, ?)',
+                         (date, team1.strip(), team2.strip(),
                           odds1, odds2, money1, money2, winner))
             conn.commit()
         self._create_bettor_table(team1, team2, date)
@@ -57,7 +59,7 @@ class betdb(object):
             curs = conn.cursor()
             curs.execute('select odds1, odds2 from fights where '
                          "team1=:tm1 and team2=:tm2 order by"
-                         ' date desc', {'tm1': team1, 'tm2': team2})
+                         ' time desc', {'tm1': team1, 'tm2': team2})
             ret = curs.fetchone()
         return ret if ret is not None else [None, None]
 
@@ -67,9 +69,20 @@ class betdb(object):
             curs = conn.cursor()
             curs.execute('select money1, money2 from fights where '
                          "team1=:tm1 and team2=:tm2 order by"
-                         ' date desc', {'tm1': team1, 'tm2': team2})
+                         ' time desc', {'tm1': team1, 'tm2': team2})
             ret = curs.fetchone()
         return ret if ret is not None else [None, None]
+
+    def get_winner(self, team1, team2):
+        ret = [None, None]
+        with access("bet.db") as conn:
+            curs = conn.cursor()
+            curs.execute('select winner, time from fights where'
+                         ' team1=:tm1 and team2=:tm2'
+                         ' order by time desc',
+                         {"tm1": team1, "tm2": team2})
+            ret = curs.fetchone()
+        return ret
 
     def get_all_fighters(self):
         ''' Returns a set of all recorded fighters '''
@@ -133,7 +146,7 @@ class betdb(object):
         fights = {}
         with access("bet.db") as conn:
             curs = conn.cursor()
-            curs.execute("select date, team1, team2 from fights")
+            curs.execute("select time, team1, team2 from fights")
             ret = curs.fetchall()
             if ret is not None:
                 for fight in ret:
@@ -154,14 +167,13 @@ class betdb(object):
         return fights
 
     def get_last_fight(self):
-        day = dt.today()
         time = dt.now()
         with access("bet.db") as conn:
             curs = conn.cursor()
-            curs.execute("select date, time, team1, team2, odds1, odds2, "
-                         "money1, money2, winner from fights where date <"
-                         " :date and time < :time order by date desc",
-                         {"date": day, "time": time})
+            curs.execute("select time, team1, team2, odds1, odds2, "
+                         "money1, money2, winner from fights where "
+                         "time < :time order by time desc",
+                         {"time": time})
             ret = curs.fetchone()
         return ret if ret is not None else [None for i in range(9)]
 
@@ -170,31 +182,31 @@ class betdb(object):
             curs = conn.cursor()
             curs.execute("update fights set odds1 = :od1, "
                          "odds2 = :od2 where team1 = :tm1"
-                         " and team2 = :tm2 and date=:date",
+                         " and team2 = :tm2 and time=:date",
                          {"tm1": team1.strip(), "tm2": team2.strip(),
                           "od1": odds1, "od2": odds2, "date": date})
-        conn.commit()
+            conn.commit()
 
     def update_money(self, team1, team2, money1, money2, date):
         with access("bet.db") as conn:
             curs = conn.cursor()
             curs.execute('update fights set money1=:money1, '
                          "money2=:money2 where team1=:team1 "
-                         " and team2=:team2 and date=:date",
+                         " and team2=:team2 and time=:date",
                          {"team1": team1, "team2": team2,
                           "money1": money1, "money2": money2,
                           "date": date})
-        conn.commit()
+            conn.commit()
 
     def update_winner(self, team1, team2, date, winner):
         with access("bet.db") as conn:
             curs = conn.cursor()
             curs.execute('update fights set winner=:win '
                          'where team1=:tm1 and team2=:tm2'
-                         ' and date=:dt',
+                         ' and time=:dt',
                          {"dt": date, "tm1": team1,
                           "tm2": team2, "win": winner})
-        conn.commit()
+            conn.commit()
 
     def update_bet(self, team1, team2, date, team, bettor, bet):
         with access("bet.db") as conn:
@@ -205,7 +217,7 @@ class betdb(object):
                              team1, team2,
                              dt.strftime(date, '%m-%d-%Y-%M:%S')),
                          {'team': team, 'bettor': bettor, 'bet': bet})
-        conn.commit()
+            conn.commit()
 
     def bet_table_empty(self, team1, team2, date):
         ret = False

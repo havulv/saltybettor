@@ -7,6 +7,7 @@
           arent't counted in addition to the sleeper
 '''
 
+import os
 import time
 import logging as log
 from datetime import datetime as dt
@@ -20,6 +21,7 @@ log.basicConfig(filename="saltbot.log", level=log.INFO,
 
 
 def l_strcmp(str1, str2):
+    ''' A loose string comparison for checking two grepped strings '''
     end = len(str1) if len(str1) < len(str2) else len(str2)
     for i, j in zip(str1[:end], str2[:end]):
         if i != j:
@@ -28,6 +30,7 @@ def l_strcmp(str1, str2):
 
 
 def keyboardwrap(func):
+    ''' Wrapper for quit out by Ctrl-C '''
     def wrapper(*args, **kwargs):
         ret = None
         try:
@@ -40,22 +43,28 @@ def keyboardwrap(func):
 
 
 class SaltBot(object):
+    '''
+        The main SaltBot which controls the database writes and holds
+        data structures pertaining to the performance of individual
+        characters.
+    '''
 
     auth = False
 
     def __init__(self, credentials, driver=None):
-        self.prev_winner = None
         self.bet_table = {}
         self.players = [[None, 0, 0], [None, 0, 0]]
         self._can_bet = False
         self._base_url = "http://www.saltybet.com/"
         self._auth_url = self._base_url + "authenticate?signin=1"
+
         self.driver, self.driver_name = self._driver_init(driver)
         if self._authenticate(credentials):
             log.info("Authorized")
             del credentials
         else:
             raise Exception("AuthenticationError")
+
         self._db = betdb()
         self._db.create_fight_table()
         self.odds_dict = {}
@@ -63,7 +72,27 @@ class SaltBot(object):
         self.avg_odds_dict = {}
         self.fighters = []
 
-    def _driver_init(self, driver):
+    def _driver_init(self, driver=None):
+        '''
+            Private method for initializing a chosen driver.
+            Supports Headless Chrome and PhantomJS and handles some
+                of the errors associated with driver initialization.
+                Headless chrome requires that you input the path to
+                the chrome binary. If None is passed as an argument,
+                then the function will search for the first available
+                webdriver in the $PATH variable.
+
+            Returns the driver that is being used and the name of
+                said driver.
+
+            args:
+                driver          -> type    == str or None
+                                   accepts == phantomjs
+                                              headless chrome path
+            returns:
+                driver          -> type == selenium.webdriver
+                driver_name     -> type == str
+        '''
         avail = [(webdriver.Chrome, "Chrome"),
                  (webdriver.PhantomJS, "PhantomJS")]
         log.info("Searching for driver")
@@ -78,9 +107,15 @@ class SaltBot(object):
                 # If using chrome headless then the input is [chrome, headless, path]
                 if 'headless' in driver_set and "chrome" in driver_set:
                     options = webdriver.ChromeOptions()
-                    options.binary_location = driver_set[2]
-                    options.add_argument('headless')
-                    driver = webdriver.Chrome(chrome_options=options)
+                    pth = os.path.normpath(driver_set[2])
+                    if os.path.isfile(pth):
+                        options.binary_location = pth
+                        options.add_argument('headless')
+                        driver = webdriver.Chrome(chrome_options=options)
+                        driver_name = "Headless Chrome"
+                    else:
+                        raise Exception("Invalid path to Chrome"
+                                        " binary: Not a file")
 
         else:
             for layer, name in avail:
@@ -100,11 +135,11 @@ class SaltBot(object):
         '''
             Authenticates the user's credentials on the relevant pages of
                 saltybets.
-                args:
-                    driver      -> type == selenium.webdriver
-                    credentials -> type == dictionary
-                returns:
-                    bool
+
+            args:
+                credentials -> type == dictionary
+            returns:
+                bool
 
             I really hate that this is a function because it has huge side effects
                 It changes the ENTIRE state of the browser. But this can't be
@@ -131,6 +166,15 @@ class SaltBot(object):
         return True
 
     def _check_bet(self):
+        '''
+            Void private function that checks whether the user can
+                place a bet. Users should not directly use this
+                method or the _can_bet variable, as the place_bet
+                method will handle any thread-locking.
+
+            args: void
+            returns: void
+        '''
         checker = []
         table = bs(self.driver.page_source,
                    'html.parser').find('div', id='bet-table')
@@ -138,9 +182,17 @@ class SaltBot(object):
             checker.append(tag.find('input')['value'])
         self._can_bet = all(checker)
 
-    # The winner tag is only available for about 4-5 seconds, so timeouts that check this
-    # value should remain in the 2-2.5 second zone so they don't miss the win.
     def update_winner(self):
+        '''
+            Evaluates whether the users have been notified of a winner
+                or not. Returns False on no update and True if a winner
+                has been created. As well, if a winner has been created
+                the function will set the self.winner attribute
+
+            args: void
+            returns:
+                ret -> type == bool
+        '''
         ret = False
         status = bs(self.driver.page_source,
                     'html.parser').find("span", id="betstatus")
@@ -155,6 +207,17 @@ class SaltBot(object):
         return ret
 
     def update_bettors(self):
+        '''
+            Evaluates whether to update the internal bet table with
+                all of the users that have bet for a particular fight.
+                If the bet table cannot be updated then False is
+                returned, and True is returned only if the table is
+                correctly updated (up to some Index/ValueErrors)
+
+            args: void
+            returns:
+                ret -> type == bool
+        '''
         ret = False
         self._check_bet()
         table = bs(self.driver.page_source,
@@ -170,10 +233,8 @@ class SaltBot(object):
                     player = player.text
                     try:
                         player = [x.strip() for x in player.split("|")][int(i) - 1]
-                    except IndexError:
-                        print(player)
-                        print([x.strip() for x in player.split("|")])
-                        print(int(i) - 1)
+                    except IndexError:  # Case: picking up on the winner of the last match
+                        pass
                     if player not in [i[0] for i in self.players]:
                         self.players.append([player, 0, 0])
                         if len(self.players) > 2:
@@ -199,6 +260,20 @@ class SaltBot(object):
         return ret
 
     def update_players(self):
+        '''
+            Evaluates whether to update the internal players. Relies
+                on _can_bet being activated by _check_bet because the
+                only time that the players are visible in the correct
+                order is when the player can bet. This lowers the
+                number of DOM walks done by BeautifulSoup. Updates
+                the internal player list accordingly.
+            As well, the players are rotated through when updating, so
+                as to avoid duplicating entries.
+
+            args: void
+            returns:
+                ret -> type == bool
+        '''
         ret = False
         self._check_bet()
         if self._can_bet:
@@ -277,18 +352,16 @@ class SaltBot(object):
         fights = self._db.get_all_fights()
         if fights is not None:
             self.fighters = list(set(
-                [k for j in [(i[0], i[1]) for i in fights] for k in j]))
+                [k for j in [(i[0], i[1], i[4]) for i in fights] for k in j]))
 
             self.odds_dict = {fighter: {} for fighter in self.fighters}
             self.win_dict = {fighter: {} for fighter in self.fighters}
-            self.fight_dict = {fighter: 0 for fighter in self.fighters}
+            self.fight_dict = {fighter: 1 for fighter in self.fighters}
             self.avg_odds_dict = {fighter: 0 for fighter in self.fighters}
 
             while len(fights) > 0:
                 t1, t2, o1, o2, win = fights.pop()
                 loser = t1 if win == t2 else t2
-                self.fight_dict[loser] += 1
-                self.fight_dict[win] += 1
                 for i, j in zip([self.win_dict, self.odds_dict, self.odds_dict],
                                 [(win, loser, 1), (t1, t2, o1), (t2, t1, o2)]):
                     if i[j[0]].get(j[1]) is not None:
@@ -364,15 +437,14 @@ class SaltBot(object):
                                  self.players[0][1], self.players[1][1],
                                  fight_time)
 
-            if self.odds_dict.get(self.players[0][0]) is None:
-                self.odds_dict[self.players[0][0]] = {self.players[1][0]: self.players[1][1]}
-            else:
-                self.odds_dict[self.players[0][0]][self.players[1][0]] += self.players[0][1]
-
-            if self.odds_dict.get(self.players[1][0]) is None:
-                self.odds_dict[self.players[1][0]] = {self.players[0][0]: self.players[0][1]}
-            else:
-                self.odds_dict[self.players[1][0]][self.players[0][1]] += self.players[1][1]
+            for i, j in zip(self.players, reversed([x[0] for x in self.players])):
+                if self.odds_dict.get(i[0]) is None:
+                    self.odds_dict[i[0]] = {j: i[1]}
+                else:
+                    if self.odds_dict[i[0]].get(j) is None:
+                        self.odds_dict[i[0]][j] = i[1]
+                    else:
+                        self.odds_dict[i[0]][j] += i[1]
 
             log.info("Updated odds: {} ({}) vs. {} ({})".format(
                 self.players[0][0], self.players[0][1],
@@ -393,21 +465,30 @@ class SaltBot(object):
                 self.players[1][0], self.players[1][2]))
 
     def create_winner(self, fight_time):
-        self._db.update_winner(self.players[0][0], self.players[1][0],
-                               fight_time, self.winner)
+        recent_fight = self._db.get_winner(self.players[0][0], self.players[1][0])
+        if recent_fight[0] == 'None':
+            if (dt.now() - recent_fight[1]).seconds > 10:
+                self._db.update_winner(self.players[0][0], self.players[1][0],
+                                       fight_time, self.winner)
 
-        if l_strcmp(self.winner, self.players[1][0]):
-            if self.win_dict[self.players[1][0]].get([self.players[0][0]]) is None:
-                self.win_dict[self.players[1][0]][self.players[0][0]] = 1
-            else:
-                self.win_dict[self.players[1][0]][self.players[0][0]] += 1
-        else:
-            if self.win_dict[self.players[0][0]].get([self.players[1][0]]) is None:
-                self.win_dict[self.players[0][0]][self.players[1][0]] = 1
-            else:
-                self.win_dict[self.players[0][0]][self.players[1][0]] += 1
+                if l_strcmp(self.winner, self.players[1][0]):
+                    if self.win_dict.get(self.players[1][0]) is None:
+                        self.win_dict[self.players[1][0]] = {self.players[0][0]: 1}
+                    else:
+                        if self.win_dict[self.players[1][0]].get(self.players[0][0]) is None:
+                            self.win_dict[self.players[1][0]][self.players[0][0]] = 1
+                        else:
+                            self.win_dict[self.players[1][0]][self.players[0][0]] += 1
+                else:
+                    if self.win_dict.get(self.players[1][0]) is None:
+                        self.win_dict[self.players[1][0]] = {self.players[1][0]: 1}
+                    else:
+                        if self.win_dict[self.players[1][0]].get(self.players[1][0]) is None:
+                            self.win_dict[self.players[1][0]][self.players[1][0]] = 1
+                        else:
+                            self.win_dict[self.players[1][0]][self.players[1][0]] += 1
 
-        log.info("Updated winner: {}".format(self.winner))
+                log.info("Updated winner: {}".format(self.winner))
 
     def create_bet_table(self, fight_time):
         if not self._db.bet_table_empty(self.players[0][0],
@@ -417,11 +498,16 @@ class SaltBot(object):
                 self.players[0][0], self.players[1][0],
                 fight_time, self.bet_table)
 
-        log.info("Updated bet table, fight_{}_{}_{}".format(
-            self.players[0][0], self.players[1][0],
-            dt.strftime(fight_time, '%m_%d_%Y_%M')))
+            log.info("Updated bet table, fight_{}_{}_{}".format(
+                self.players[0][0], self.players[1][0],
+                dt.strftime(fight_time, '%m_%d_%Y_%M')))
 
     def _validate_players(self, old_players, fight_time):
+        '''
+            A helper function to control for grabbing the wrong player names
+            on startup. Checks whether the player names are actually odds or
+            and resets everything to 0 and None in the case that they are.
+        '''
         if all(map(lambda x: x is not None, [i[0] for i in self.players])):
             try:
                 int(self.players[0][0])
@@ -467,13 +553,11 @@ class SaltBot(object):
                 fight_time = self.create_fight()
             else:
                 if fight_time is not None and \
-                        all(map(lambda x: x[1] != 0,
-                                self.players)):
+                        all([x[1] != 0 for x in self.players]):
                     self.create_odds(fight_time)
 
                 if fight_time is not None and \
-                        all(map(lambda x: x[2] != 0,
-                                self.players)):
+                        all([x[2] != 0 for x in self.players]):
                     self.create_money(fight_time)
 
                 if self.bet_table and \
@@ -481,11 +565,12 @@ class SaltBot(object):
                                 self.bet_table.keys())):
                     self.create_bet_table(fight_time)
 
-                if self.winner is not None:
+                if self.winner is not None \
+                        and self.players[1][0] is not None \
+                        and self.players[0][0] is not None:
                     self.create_winner(fight_time)
 
             old_players = [self.players[0][0], self.players[1][0]]
-            time.sleep(4.75)
 
     def run(self):
         try:
