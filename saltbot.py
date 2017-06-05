@@ -542,7 +542,6 @@ class SaltBot(object):
                     self.create_winner(fight_time)
 
             old_players = [self.players[0][0], self.players[1][0]]
-            time.sleep(4.75)
 
     def run(self):
         try:
