@@ -1,0 +1,27 @@
+language: python
+# I need to create a new docker image to compile for this repo
+# Or, I can use something that has either gcc or whatever
+
+# Why are people lagging behind on 3.6. This is ridiculous. Using generic install
+# python:
+#     - "3.6"
+
+os:
+    - linux
+#   - osx apparently 3.6 can't be downloaded? wtf.
+#   - windows Apparently python on windows is not supported. wtf
+
+before_install:
+    - if [[ ":$PATH:" != *":/home/build/.local/bin:"* ]]; then PATH=/home/build/.local/bin:$PATH; fi;
+    - pip install virtualenv
+    - virtualenv .
+    - ls -aln
+
+install:
+    - source ./bin/activate
+    - pip install -r requirements.txt
+    - pip install .
+
+script:
+#     Test the package
+    - nosetests && ./deploy.sh
