@@ -1,0 +1,7 @@
+#! /usr/bin/env python
+
+import saltybettor
+import sys
+
+if __name__ == "__main__":
+    saltybettor.main(saltybettor.parse_args(sys.argv[1:]))
