@@ -1,8 +1,8 @@
 #! /usr/bin/env python3.7
 
-from . import saltybot
+from . import saltbot
 import sys
 
 
 if __name__ == "__main__":
-    saltybot.main(email=sys.argv[1], pwrd=sys.argv[2])J
+    saltbot.main(saltbot.parse_args(sys.argv[1:]))

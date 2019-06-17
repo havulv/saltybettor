@@ -1,4 +1,4 @@
-#! /usr/bin/env python3
+#! /usr/bin/env python
 
 '''
     Potentially use PhantomJS instead of Chrome webdriver
@@ -7,14 +7,17 @@
           arent't counted in addition to the sleeper
 '''
 
-import os
-import time
-import logging as log
+from selenium.common import exceptions as selenium_except
 from datetime import datetime as dt
 from bs4 import BeautifulSoup as bs
-from database import betdb
 from selenium import webdriver
-from selenium.common import exceptions as Except
+from .database import betdb
+import logging as log
+import argparse
+import time
+import sys
+import re
+import os
 
 log.basicConfig(filename="saltbot.log", level=log.INFO,
                 format="%(asctime)s [%(levelname)s] :: %(message)s")
@@ -51,14 +54,16 @@ class SaltBot(object):
 
     auth = False
 
-    def __init__(self, credentials, driver=None):
+    def __init__(self, credentials, driver=None,
+                 chrome_headless=None):
         self.bet_table = {}
         self.players = [[None, 0, 0], [None, 0, 0]]
         self._can_bet = False
         self._base_url = "http://www.saltybet.com/"
         self._auth_url = self._base_url + "authenticate?signin=1"
 
-        self.driver, self.driver_name = self._driver_init(driver)
+        self.driver, self.driver_name = self._driver_init(driver,
+                                                          chrome_headless)
         if self._authenticate(credentials):
             log.info("Authorized")
             del credentials
@@ -72,7 +77,7 @@ class SaltBot(object):
         self.avg_odds_dict = {}
         self.fighters = []
 
-    def _driver_init(self, driver=None):
+    def _driver_init(self, driver=None, chrome_headless=None):
         '''
             Private method for initializing a chosen driver.
             Supports Headless Chrome and PhantomJS and handles some
@@ -93,40 +98,35 @@ class SaltBot(object):
                 driver          -> type == selenium.webdriver
                 driver_name     -> type == str
         '''
-        avail = [(webdriver.Chrome, "Chrome"),
-                 (webdriver.PhantomJS, "PhantomJS")]
+        avail = {"Chrome".casefold(): webdriver.Chrome,
+                 "PhantomJS".casefold(): webdriver.PhantomJS}
         log.info("Searching for driver")
         if driver is not None:
-            driver_set = list(map(lambda x: x.lower().strip(),
-                                  driver.split(' ')))
-            if len(driver_set) < 2:
-                driver_name = driver_set[0]
-                driver = avail[[i[1].lower() for i in avail].index(
-                    driver.lower())][0]()
-            else:
+            try:
+                driver_name = driver.casefold()
+                driver = avail[driver_name]
+            except KeyError:
+                raise Exception(f"Invalid driver {driver}")
+
+            if driver_name == 'chrome' and chrome_headless is not None:
                 # If using chrome headless then the input is [chrome, headless, path]
-                if 'headless' in driver_set and "chrome" in driver_set:
-                    options = webdriver.ChromeOptions()
-                    pth = os.path.normpath(driver_set[2])
-                    if os.path.isfile(pth):
-                        options.binary_location = pth
-                        options.add_argument('headless')
-                        driver = webdriver.Chrome(chrome_options=options)
-                        driver_name = "Headless Chrome"
-                    else:
-                        raise Exception("Invalid path to Chrome"
-                                        " binary: Not a file")
+                options = webdriver.ChromeOptions()
+                pth = os.path.normpath(chrome_headless)
+                options.binary_location = pth
+                options.add_argument('headless')
+                driver = webdriver.Chrome(chrome_options=options)
+                driver_name = "Headless Chrome"
 
         else:
-            for layer, name in avail:
+            for name, layer in avail.items():
                 try:
                     driver = layer()
                     driver_name = name
                     break
-                except Except.WebDriverException:
+                except selenium_except.WebDriverException:
                     pass
         if driver is None:
-            raise Except.WebDriverException
+            raise selenium_except.WebDriverException
         log.info("Driver {} found".format(driver_name))
 
         return driver, driver_name
@@ -588,7 +588,7 @@ class SaltBot(object):
 
 
 # This is for preliminary testing, change in the future
-def get_credentials():
+def get_credentials(email, passwd):
     '''
         Returns the credentials of the user, whether stored somewhere
             on the machine or entered by hand.
@@ -596,16 +596,19 @@ def get_credentials():
         returns
             credentials -> type == dictionary
     '''
-    email = input("email: ")
-    passwd = input("password: ")
+    if not email:
+        email = input("email: ")
+
+    if not passwd:
+        passwd = input("password: ")
     return {"email": email, "pword": passwd}
 
 
-def main(email=None, pwrd=None):
-    drive = input("Specific driver? ")
-    if drive == "no":
-        drive = None
-    salt_bot = SaltBot(get_credentials(), driver=drive)
+def main(args):
+    salt_bot = SaltBot(
+        get_credentials(args.email, args.password),
+        driver=args.driver,
+        chrome_headless=args.headless)
 
     if salt_bot.load():
         print("Database loaded into memory")
@@ -614,9 +617,62 @@ def main(email=None, pwrd=None):
     salt_bot.record()
 
 
+def parse_email(addr):
+
+    if isinstance(addr, str):
+        if re.fullmatch(r"[^@]+@[^@]+\.[^@]+", addr):
+            return addr
+
+    raise argparse.ArgumentTypeError(
+        f"{addr} is not a valid email address.")
+
+
+def parse_driver(drvr):
+
+    if isinstance(drvr, str):
+        if drvr.casefold() in ['chrome', 'phantomjs']:
+            return drvr
+
+    raise argparse.ArgumentTypeError(
+        f"{drvr} is not a valid driver. Only chrome "
+        f"and phantomjs are available")
+
+
+def parse_bin(fname):
+
+    if os.path.exists(fname):
+        if os.path.isfile(fname):
+            return os.path.abspath(fname)
+
+        raise argparse.ArgumentTypeError(
+            f"{fname} is not a file.")
+
+    raise argparse.ArgumentTypeError(
+        f"{fname} does not exist.")
+
+
+def parse_args(args):
+
+    parser = argparse.ArgumentParser(
+        prog='saltybettor',
+        description='A bot for placing bets on SaltyBet, running'
+                    ' off of selenium and the Gmail API (email alerts).')
+    parser.add_argument(
+        '-e', '--email', type=parse_email,
+        help=("An gmail address for alerts on the bot."))
+    parser.add_argument(
+        '-p', '--password', nargs=1,
+        help=("The password or the email that is being used."))
+    parser.add_argument(
+        '-d', '--driver', nargs=1, type=parse_driver,
+        help=("The driver to use for the bot. Currently, only Chrome"
+              " or PhantomJS is supported"))
+    parser.add_argument(
+        '-l', '--headless', nargs=1, type=parse_bin,
+        help=("The path to the chrome binary for use with headless chrome"))
+
+    return parser.parse_args(args)
+
+
 if __name__ == "__main__":
-    import sys
-    try:
-        main(email=sys.argv[1], pwrd=sys.argv[2])
-    except IndexError:
-        main()
+    main(parse_args(sys.argv[1:]))
