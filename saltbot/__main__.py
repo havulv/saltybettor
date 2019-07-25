@@ -1,6 +1,9 @@
 #! /usr/bin/env python3.7
 
-from . import saltbot
+try:
+    from . import saltbot
+except ImportError:
+    import saltbot
 import sys
 
 

@@ -118,3 +118,4 @@ dmypy.json
 
 ## Special ignores
 *.swp
+*.db

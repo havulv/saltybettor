@@ -5,6 +5,20 @@ import sqlite3
 import time
 
 
+digit_map = {
+    0: 'zero',
+    1: 'one',
+    2: 'two',
+    3: 'three',
+    4: 'four',
+    5: 'five',
+    6: 'six',
+    7: 'seven',
+    8: 'eight',
+    9: 'nine',
+}
+
+
 # TODO existence checks on table creations
 # TODO create a shared cursor that can be
 #      passed around instead of opening and closing one constantly
@@ -24,8 +38,8 @@ class Access(object):
 
 class Betdb(object):
 
-    def clean_string(self, func):
-        def _clean(*args, **kwargs):
+    def clean_string(func):
+        def _clean(self, *args, **kwargs):
             cargs = []
             for arg in args:
                 if isinstance(arg, str):
@@ -37,9 +51,11 @@ class Betdb(object):
             for k, v in kwargs.items():
                 if isinstance(v, str):
                     ckwargs[k] = re.sub('[^0-9a-zA-Z]+', '_', v)
+                    if re.match('^[0-9]', ckwargs[k]):
+                        ckwargs[k] = digit_map(ckwargs[k][0]) + ckwargs[k][1:]
                 else:
                     ckwargs[k] = v
-            return self.func(*args, **kwargs)
+            return func(self, *args, **kwargs)
         return _clean
 
     def create_fight_table(self):
@@ -77,7 +93,7 @@ class Betdb(object):
             current = curs.fetchone()
             if current is None:
                 curs.execute(
-                    'insert into fights(time, p1, p2, m1, m2, winner) '
+                    'insert into fights(time, p1, p2, m1, m2, status, winner) '
                     'values (?, ?, ?, ?, ?, ?, ?)',
                     (ftime, first_player.strip(), second_player.strip(),
                      money1, money2, status, winner))
@@ -89,7 +105,7 @@ class Betdb(object):
 
                 curs.execute('update fights set m1=:m1, m2=:m2, '
                              'status=:status, winner=:winner where '
-                             'time=:time p1=:p1  and p2=:p2',
+                             'time=:time and p1=:p1 and p2=:p2',
                              {'time': ftime, 'status': status, 'p1': first_player,
                               'p2': second_player, 'm1': money1, 'm2': money2,
                               'status': status, 'winner': winner})
@@ -187,6 +203,17 @@ class Betdb(object):
         return ret if ret is not None else [None for i in range(9)]
 
     @clean_string
+    def create_bettor_table(self):
+        with Access("bet.db") as conn:
+            curs = conn.cursor()
+            curs.execute("SELECT name from sqlite_master where "
+                         "type='table' and name='bettors'")
+            if curs.fetchone() is None:
+                curs.execute('CREATE TABLE if not exists bettors'
+                             '(bettor text, origin timestamp)')
+                conn.commit()
+
+    @clean_string
     def create_bettor(self, bettor_name, timestamp):
         with Access("bet.db") as conn:
             curs = conn.cursor()
@@ -214,7 +241,7 @@ class Betdb(object):
         self.create_table(bettor_name, ftime)
         with Access("bet.db") as conn:
             curs = conn.cursor()
-            curs.execute('SELECT balance, beton, wager, ran from {}'
+            curs.execute('SELECT balance, beton, wager, rank from {}'
                          ' where fighttime=:ftime'.format(bettor_name),
                          {'ftime': ftime})
             if curs.fetchone() is not None:
@@ -241,23 +268,23 @@ class Betdb(object):
             else:
                 existing = curs.fetchall()
 
-            for bettor, info in bettors.values():
+            for bettor, info in bettors.items():
                 if bettor not in existing:
                     curs.execute('create table if not exists {} '
                                  '(fighttime timestamp, balance integer, '
                                  'beton integer, wager integer, rank integer)'
                                  ''.format(bettor))
-                    curs.commit()
-                curs.execute('SELECT balance, beton, wager, ran from {}'
+                    conn.commit()
+                curs.execute('SELECT balance, beton, wager, rank from {}'
                              ' where fighttime=:ftime'.format(bettor),
                              {'ftime': fighttime})
                 if curs.fetchone() is not None:
                     curs.execute("update {} set balance=:bal, beton=:bt, "
-                                 "wager=:wag, rank=:rn where fighttime=:ftime",
-                                 {'bal': info['balance'], 'bt': info['beton'],
+                                 "wager=:wag, rank=:rn where fighttime=:ftime".format(bettor),
+                                 {'bal': info['balance'], 'bt': info['bet'],
                                   'wag': info['wager'], 'rn': info['rank'], 'ftime': fighttime})
                 else:
                     curs.execute('insert into {}(fighttime, balance, beton, wager, rank) '
                                  'values(?, ?, ?, ?, ?)'.format(bettor),
                                  (fighttime, info['balance'], info['bet'], info['wager'], info['rank']))
-            curs.commit()
+            conn.commit()

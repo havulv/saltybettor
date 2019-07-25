@@ -4,10 +4,8 @@
     TODO: Implement a timer thread, so that the database writes
           arent't counted in addition to the sleeper
 '''
-
 from selenium.common import exceptions as selenium_except
 from selenium import webdriver
-from .database import Betdb
 import logging as log
 import requests
 import argparse
@@ -16,6 +14,10 @@ import sys
 import re
 import os
 
+try:
+    from .database import Betdb, digit_map
+except ImportError:
+    from database import Betdb, digit_map
 
 log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "logs"))
 if not os.path.exists(log_dir):
@@ -28,15 +30,6 @@ fhandler.setLevel(log.DEBUG)
 formatter = log.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 fhandler.setFormatter(formatter)
 root.addHandler(fhandler)
-
-
-def l_strcmp(str1, str2):
-    ''' A loose string comparison for checking two grepped strings '''
-    end = len(str1) if len(str1) < len(str2) else len(str2)
-    for i, j in zip(str1[:end], str2[:end]):
-        if i != j:
-            return False
-    return True
 
 
 def keyboardwrap(func):
@@ -61,23 +54,27 @@ class SaltBot(object):
 
     auth = False
 
-    def __init__(self, name, driver,
+    def __init__(self, driver=None,
                  creds=None,
                  chrome_headless=None):
         self._base_url = "http://www.saltybet.com/"
         self.logged_in = False
-        self.driver, self.driver_name = self._driver_init(name,
-                                                          chrome_headless)
-        if creds is not None:
+        if creds and driver:
+            self.driver, self.driver_name = self._driver_init(driver,
+                                                              chrome_headless)
             self._authenticate(creds)
             if self.logged_in:
                 root.info("Authorized")
                 del creds
             else:
                 raise Exception("AuthenticationError")
+            # At some point I need to grab the cookies from the login or something
+            self.driver.close()
 
         self.db = Betdb()
         self.db.create_fight_table()
+        self.db.create_bettor_table()
+        root.info("Database loaded into memory")
         self.odds_dict = {}
         self.win_dict = {}
         self.avg_odds_dict = {}
@@ -152,11 +149,13 @@ class SaltBot(object):
         '''
         auth_url = self._base_url + "authenticate?signin=1"
         self.driver.get(auth_url)
-        elem = self.driver.find_element_by_id("email")  # In case nothing is found later
-        for item in credentials.keys():
-            elem = self.driver.find_element_by_id(item)
-            elem.send_keys(credentials[item])
-        elem.submit()
+        email = self.driver.find_element_by_id("email")
+        email.send_keys(credentials['email'])
+
+        password = self.driver.find_element_by_id("password")
+        password.send_keys(credentials['password'])
+        password.submit()
+
         root.info(
             "Authorization submitted for {}".format(credentials['email']))
         if self.driver.current_url != self._base_url and \
@@ -168,18 +167,34 @@ class SaltBot(object):
             raise Exception("AuthenticationError: incorrect redirect")
         self.logged_in = True
 
-    def get_match(self):
+    def get_match(self, write=True, fighttime=None):
+        '''
+            Get the match -- write auto updates // writes the match to the
+            database to simplify calls
+        '''
         match_time = int(time.time())
-        req = requests.get(self.base_url + 'state.json',
+        req = requests.get(self._base_url + 'state.json',
                            params={'t': match_time})
         if req.status_code != 200:
             raise Exception('requests error')
 
         bet_json = req.json()
-        return self.parse_match(bet_json, match_time)
+        fight_status = self.parse_match(bet_json, match_time)
+        ftime = fight_status['time'] if fighttime is None else fighttime
+
+        self.db.record_fight(
+            ftime,
+            fight_status['first']['name'],
+            fight_status['second']['name'],
+            int(fight_status['first']['total'].replace(',', '')),
+            int(fight_status['second']['total'].replace(',', '')),
+            fight_status['status'],
+            int(fight_status['winner']))
+
+        return fight_status
 
     def parse_match(self, bet_json, match_time):
-        winner = None
+        winner = -1
         status = bet_json['status']
         if status not in ['open', 'locked']:
             status = 'over'
@@ -187,14 +202,14 @@ class SaltBot(object):
 
         return {'first': {'name': bet_json['p1name'], 'total': bet_json['p1total']},
                 'second': {'name': bet_json['p2name'], 'total': bet_json['p2total']},
-                'bet status': status,
+                'status': status,
                 'winner': winner,
                 'tournament status': bet_json['remaining'],
                 'time': match_time}
 
-    def get_bettors(self):
+    def get_bettors(self, fighttime=None):
         match_time = int(time.time())
-        req = requests.get(self.base_url + 'zdata.json',
+        req = requests.get(self._base_url + 'zdata.json',
                            params={'t': match_time})
 
         if req.status_code != 200:
@@ -204,10 +219,13 @@ class SaltBot(object):
         bettor_data = {k: v for k, v in bettor_json.items() if k.isdigit()}
         match_data = {k: v for k, v in bettor_json.items() if not k.isdigit()}
 
+        match = self.parse_match(match_data, match_time)
         bettors = {}
-        for ind, values in bettor_data:
+        for ind, values in bettor_data.items():
             name = values['n']
-            bettors[name] = {'balance': int(values.get('b'))}
+            if name[0].isdigit():
+                name = digit_map[int(name[0])] + name[1:]
+            bettors[name] = {'balance': int(values.get('b').replace(',', ''))}
             bettors[name]['bet'] = values.get('p')
             bettors[name]['wager'] = values.get('w')
             bettors[name]['rank'] = values.get('r')
@@ -215,89 +233,73 @@ class SaltBot(object):
                 if len(bettors[name]['rank']) > 2:
                     bettors[name]['rank'] = 25
 
-        return ({'bettors': bettors, 'time': time},
-                self.parse_match(match_data, match_time))
-
-    def fight_status(self, fighttime=None):
-        fight_status = self.get_match()
-        ftime = fight_status['time'] if fighttime is None else fighttime
+        ftime = match['time'] if fighttime is None else fighttime
         self.db.record_fight(
             ftime,
-            fight_status['first']['name'],
-            int(fight_status['first']['total']),
-            fight_status['second']['name'],
-            int(fight_status['second']['total']),
-            fight_status['status'],
-            int(fight_status['winner']))
-
-        return ftime, fight_status['winner']
-
-    def bettor_status(self, fighttime=None):
-        bettor_status, fight_status = self.get_bettors()
-        ftime = fight_status['time'] if fighttime is None else fighttime
-        self.db.record_fight(
-            ftime,
-            fight_status['first']['name'],
-            int(fight_status['first']['total']),
-            fight_status['second']['name'],
-            int(fight_status['second']['total']),
-            fight_status['status'],
-            int(fight_status['winner']))
+            match['first']['name'],
+            match['second']['name'],
+            int(match['first']['total'].replace(',', '')),
+            int(match['second']['total'].replace(',', '')),
+            match['status'],
+            int(match['winner']))
 
         self.db.record_bettors(
-            bettor_status['bettors'],
+            bettors,
             ftime)
-        return ftime, fight_status['winner']
+
+        return ({'bettors': bettors, 'time': ftime}, match)
+
+    def fight_status(self, fighttime=None):
+        fight_status = self.get_match(fighttime=fighttime)
+        ftime = fight_status['time'] if fighttime is None else fighttime
+
+        return ftime, fight_status
+
+    def bettor_status(self, fighttime=None):
+        bettor_status, fight_status = self.get_bettors(fighttime)
+        ftime = fight_status['time'] if fighttime is None else fighttime
+        return ftime, fight_status
 
     def run(self):
         ftime = None
+        last_won = {'first': {'name': None, 'total': None},
+                    'second': {'name': None, 'total': None}}
         try:
             while True:
-                ftime, won = self.fight_status(self, ftime)
-                time.sleep(3)
-                ftime, won = self.bettor_status(self, ftime)
-                if won is not None:
-                    ftime = None
-                time.sleep(5)
+                ftime, fght = self.fight_status(ftime)
+                print(ftime, f"{fght['first']['name']} ({fght['first']['total']}) vs. {fght['second']['name']} ({fght['second']['total']})")
+                time.sleep(2)
+                ftime, fght = self.bettor_status(ftime)
+                print(ftime, f"{fght['first']['name']} ({fght['first']['total']}) vs. {fght['second']['name']} ({fght['second']['total']})")
+                if int(fght['winner']) > -1:
+                    if last_won['first'] != fght['first'] and last_won['second'] != fght['second']:
+                        print(f"{fght['first' if fght['winner'] == 0 else 'second']} won!")
+                        ftime = None
+                        last_won['first'] = fght['first']
+                        last_won['second'] = fght['second']
+
+                time.sleep(4)
         except KeyboardInterrupt:
             root.info("Keyboard close")
             print("Cleaning up")
 
 
-# This is for preliminary testing, change in the future
-def get_credentials(email, passwd):
-    '''
-        Returns the credentials of the user, whether stored somewhere
-            on the machine or entered by hand.
-
-        returns
-            credentials -> type == dictionary
-    '''
-    if not email:
-        email = input("email: ")
-
-    if not passwd:
-        passwd = input("password: ")
-    return {"email": email, "pword": passwd}
-
-
 def main(args):
+    creds = None
+    if args.email and args.password:
+        creds = {'email': args.email,
+                 'password': args.password}
     salt_bot = SaltBot(
-        get_credentials(args.email, args.password),
-        driver=args.driver,
-        chrome_headless=args.headless)
+        creds=creds,
+        driver=args.driver)
 
-    if salt_bot.load():
-        print("Database loaded into memory")
-        root.info("Database loaded into memory")
-
-    salt_bot.record()
+    salt_bot.run()
 
 
 def parse_email(addr):
 
     if isinstance(addr, str):
-        if re.fullmatch(r"[^@]+@[^@]+\.[^@]+", addr):
+        if re.fullmatch(r"[^@]+@[^@]+\.[^@]+", addr) or addr is None:
             return addr
 
     raise argparse.ArgumentTypeError(
@@ -311,13 +313,13 @@ def parse_args(args):
         description='A bot for placing bets on SaltyBet, running'
                     ' off of selenium and the Gmail API (email alerts).')
     parser.add_argument(
-        '-e', '--email', type=parse_email,
+        '-e', '--email', type=parse_email, default=None,
         help=("A gmail address for alerts on the bot."))
     parser.add_argument(
-        '-p', '--password', nargs=1,
+        '-p', '--password', nargs=1, default=None,
         help=("The password for the email that is being used."))
     parser.add_argument(
-        '-d', '--driver', nargs=1, type=str,
+        '-d', '--driver', nargs=1, type=str, default=None,
         help=("The path to the driver(s) to use for the bot."))
 
     return parser.parse_args(args)

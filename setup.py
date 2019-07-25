@@ -12,5 +12,5 @@ setup(name="saltybettor",
       author_email="johnandersen185@gmail.com",
       scripts=['saltbot/scripts/saltybet'],
       description="A bot for placing bets on [SaltyBet](https://www.saltybet.com), running off of selenium and the Gmail API (email alerts).",
-      install_requires=['selenium>=3.3.3', 'beautifulsoup4>=4.7.1'],
+      install_requires=['selenium>=3.3.3', 'beautifulsoup4>=4.7.1', 'requests>=2.2.0'],
       keywords=['saltybet', 'MUGEN'])
