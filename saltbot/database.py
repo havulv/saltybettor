@@ -1,8 +1,9 @@
 #! /usr/bin/env python3
 
-import re
-import sqlite3
+from datetime import datetime as dt
+import psycopg2
 import time
+import re
 
 
 digit_map = {
@@ -25,9 +26,22 @@ digit_map = {
 class Access(object):
 
     def __init__(self, dbname):
-        self.dbase = sqlite3
+        self.dbase = psycopg2
         self.dbname = dbname
-        self.conn = self.dbase.connect(self.dbname, detect_types=sqlite3.PARSE_DECLTYPES)
+        try:
+            self.conn = self.dbase.connect(dbname=self.dbname, user="saltbot",
+                                           host="localhost")
+        except psycopg2.OperationalError as e:
+            if "does not exist" in ''.join(e.args):
+                first_conn = self.dbase.connect(dbname="postgres", user="saltbot",
+                                                host="localhost")
+                first_conn.set_session(autocommit=True)
+                cur = first_conn.cursor()
+                cur.execute('CREATE DATABASE ' + self.dbname)
+                cur.close()
+                first_conn.close()
+                self.conn = self.dbase.connect(dbname=self.dbname, user="saltbot",
+                                               host="localhost")
 
     def __enter__(self):
         return self.conn
@@ -59,10 +73,10 @@ class Betdb(object):
         return _clean
 
     def create_fight_table(self):
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
-            curs.execute("SELECT name from sqlite_master where "
-                         "type='table' and name='fights'")
+            curs.execute("SELECT table_name from information_schema.tables where "
+                         "table_schema='public' and table_name='fights'")
             if curs.fetchone() is None:
                 curs.execute('CREATE TABLE if not exists fights(time '
                              'timestamp, p1 text, p2 text, m1 integer, '
@@ -71,31 +85,31 @@ class Betdb(object):
 
     @clean_string
     def new_fight(self, ftime, first_player, second_player, money1, money2, status, winner):
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute(
                 'insert into fights(time, p1, p2, m1, m2, winner) '
-                'values (?, ?, ?, ?, ?, ?, ?)',
-                (ftime, first_player.strip(), second_player.strip(),
+                'values (%s, %s, %s, %s, %s, %s, %s)',
+                (dt.utcfromtimestamp(ftime), first_player.strip(), second_player.strip(),
                  money1, money2, status, winner))
             conn.commit()
-        return ftime
+        return int(ftime.total_seconds())
 
     @clean_string
     def record_fight(self, ftime, first_player, second_player,
                      money1=0, money2=0, status='Open', winner=0):
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute(
                 'select m1, m2, status, winner from fights'
-                ' where p1=:p1 and p2=:p2 and time=:time',
-                {'p1': first_player, 'p2': second_player, 'time': ftime}).fetchone()
+                ' where p1=%(p1)s and p2=%(p2)s and time=%(time)s',
+                {'p1': first_player, 'p2': second_player, 'time': dt.utcfromtimestamp(ftime)})
             current = curs.fetchone()
             if current is None:
                 curs.execute(
                     'insert into fights(time, p1, p2, m1, m2, status, winner) '
-                    'values (?, ?, ?, ?, ?, ?, ?)',
-                    (ftime, first_player.strip(), second_player.strip(),
+                    'values (%s, %s, %s, %s, %s, %s, %s)',
+                    (dt.utcfromtimestamp(ftime), first_player.strip(), second_player.strip(),
                      money1, money2, status, winner))
             else:
                 money1 = money1 if money1 is not None else current[0]
@@ -103,10 +117,10 @@ class Betdb(object):
                 status = status if status is not None else current[2]
                 winner = winner if winner is not None else current[3]
 
-                curs.execute('update fights set m1=:m1, m2=:m2, '
-                             'status=:status, winner=:winner where '
-                             'time=:time and p1=:p1 and p2=:p2',
-                             {'time': ftime, 'status': status, 'p1': first_player,
+                curs.execute('update fights set m1=%(m1)s, m2=%(m2)s, '
+                             'status=%(status)s, winner=%(winner)s where '
+                             'time=%(time)s and p1=%(p1)s and p2=%(p2)s',
+                             {'time': dt.utcfromtimestamp(ftime), 'status': status, 'p1': first_player,
                               'p2': second_player, 'm1': money1, 'm2': money2,
                               'status': status, 'winner': winner})
             conn.commit()
@@ -114,10 +128,10 @@ class Betdb(object):
     @clean_string
     def get_odds(self, p1, p2):
         ret = None
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute('select m1, m2 from fights where '
-                         "p1=:tm1 and p2=:tm2 order by"
+                         "p1=%(tm1)s and p2=%(tm2)s order by"
                          ' time desc', {'tm1': p1, 'tm2': p2})
             ret = curs.fetchone()
 
@@ -130,10 +144,10 @@ class Betdb(object):
     @clean_string
     def get_money(self, p1, p2):
         ret = [None, None]
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute('select m1, m2 from fights where '
-                         "p1=:tm1 and p2=:tm2 order by"
+                         "p1=%(tm1)s and p2=%(tm2)s order by"
                          ' time desc', {'tm1': p1, 'tm2': p2})
             ret = curs.fetchone()
         return ret
@@ -141,10 +155,10 @@ class Betdb(object):
     @clean_string
     def get_winner(self, p1, p2):
         ret = [None, None]
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute('select winner, status from fights where'
-                         ' p1=:tm1 and p2=:tm2'
+                         ' p1=%(tm1)s and p2=%(tm2)s'
                          ' order by time desc',
                          {"tm1": p1, "tm2": p2})
             ret = curs.fetchone()
@@ -153,7 +167,7 @@ class Betdb(object):
     def get_all_fighters(self):
         ''' Returns a set of all recorded fighters '''
         ret = None
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute("select p1, p2 from fights")
             ret = curs.fetchall()
@@ -162,7 +176,7 @@ class Betdb(object):
     def get_all_winners(self):
         ''' Returns a dictionary of all recorded fighters and their wins'''
         ret = None
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute("select p1, p2, winner from fights")
             ret = curs.fetchall()
@@ -173,7 +187,7 @@ class Betdb(object):
     def get_all_losers(self):
         ''' Returns a dictionary of all recorded fighters and their losses'''
         ret = None
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute("select p1, p2, winner from fights")
             ret = curs.fetchall()
@@ -184,7 +198,7 @@ class Betdb(object):
     def get_all_fights(self):
         ''' Returns the teams, totals, and winner '''
         ret = None
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute("select time, p1, p2, m1, m2, status, winner "
                          "from fights")
@@ -193,21 +207,21 @@ class Betdb(object):
 
     def get_last_fight(self):
         ftime = int(time.time())
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute("select time, p1, p2, money1, money2, "
                          "winner from fights where "
-                         "time < :time order by time desc",
-                         {"time": ftime})
+                         "time < %(time)s order by time desc",
+                         {"time": dt.utcfromtimestamp(ftime)})
             ret = curs.fetchone()
         return ret if ret is not None else [None for i in range(9)]
 
     @clean_string
     def create_bettor_table(self):
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
-            curs.execute("SELECT name from sqlite_master where "
-                         "type='table' and name='bettors'")
+            curs.execute("SELECT table_name from information_schema.tables where "
+                         "table_schema='public' and table_name='bettors'")
             if curs.fetchone() is None:
                 curs.execute('CREATE TABLE if not exists bettors'
                              '(bettor text, origin timestamp)')
@@ -215,20 +229,20 @@ class Betdb(object):
 
     @clean_string
     def create_bettor(self, bettor_name, timestamp):
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
-            curs.execute("SELECT name from sqlite_master"
-                         " where type='table' and name=bettors")
+            curs.execute("SELECT table_name from information_schema.tables"
+                         " where table_schema='public' and table_name=bettors")
             if curs.fetchone() is None:
                 curs.execute('create table if not exists bettors'
                              '(bettor text, origin timestamp)')
             else:
                 curs.execute("insert into bettors(bettor, origin) "
-                             "values (? ?)", (bettor_name, timestamp))
+                             "values (%s %s)", (bettor_name, dt.utcfromtimestamp(timestamp)))
             conn.commit()
 
-            curs.execute("SELECT name from sqlite_master "
-                         "where type='table' and name={}".format(bettor_name))
+            curs.execute("SELECT table_name from information_schema.tables "
+                         "where table_schema='public' and table_name={}".format(bettor_name))
             if curs.fetchone() is None:
                 curs.execute('create table if not exists {}'
                              '(fighttime timestamp, balance integer, '
@@ -239,26 +253,26 @@ class Betdb(object):
     @clean_string
     def record_bettor(self, bettor_name, ftime, bal, beton=0, wager=0, rank=0):
         self.create_table(bettor_name, ftime)
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute('SELECT balance, beton, wager, rank from {}'
-                         ' where fighttime=:ftime'.format(bettor_name),
-                         {'ftime': ftime})
+                         ' where fighttime=%(ftime)s'.format(bettor_name),
+                         {'ftime': dt.utcfromtimestamp(ftime)})
             if curs.fetchone() is not None:
-                curs.execute("update {} set balance=:bal, beton=:bt, "
-                             "wager=:wag, rank=:rn where fighttime=:ftime",
+                curs.execute("update {} set balance=%(bal)s, beton=%(bt)s, "
+                             "wager=%(wag)s, rank=%(rn)s where fighttime=%(ftime)s",
                              {'bal': bal, 'bt': beton,
-                              'wag': wager, 'rn': rank, 'ftime': ftime})
+                              'wag': wager, 'rn': rank, 'ftime': dt.utcfromtimestamp(ftime)})
             else:
                 curs.execute("insert into {}(fighttime, balance, beton, wager, rank) "
-                             "values (? ? ? ? ?)".format(bettor_name),
-                             (ftime, bal, beton, wager, rank))
+                             "values (%s %s %s %s %s)".format(bettor_name),
+                             (dt.utcfromtimestamp(ftime), bal, beton, wager, rank))
             conn.commit()
 
     @clean_string
     def record_bettors(self, bettors, fighttime):
         ''' Assumes that the bettors table exists '''
-        with Access("bet.db") as conn:
+        with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute("SELECT bettor from bettors")
             if curs.fetchone() is None:
@@ -276,15 +290,15 @@ class Betdb(object):
                                  ''.format(bettor))
                     conn.commit()
                 curs.execute('SELECT balance, beton, wager, rank from {}'
-                             ' where fighttime=:ftime'.format(bettor),
-                             {'ftime': fighttime})
+                             ' where fighttime=%(ftime)s'.format(bettor),
+                             {'ftime': dt.utcfromtimestamp(fighttime)})
                 if curs.fetchone() is not None:
-                    curs.execute("update {} set balance=:bal, beton=:bt, "
-                                 "wager=:wag, rank=:rn where fighttime=:ftime".format(bettor),
+                    curs.execute("update {} set balance=%(bal)s, beton=%(bt)s, "
+                                 "wager=%(wag)s, rank=%(rn)s where fighttime=%(ftime)s".format(bettor),
                                  {'bal': info['balance'], 'bt': info['bet'],
-                                  'wag': info['wager'], 'rn': info['rank'], 'ftime': fighttime})
+                                  'wag': info['wager'], 'rn': info['rank'], 'ftime': dt.utcfromtimestamp(fighttime)})
                 else:
                     curs.execute('insert into {}(fighttime, balance, beton, wager, rank) '
-                                 'values(?, ?, ?, ?, ?)'.format(bettor),
-                                 (fighttime, info['balance'], info['bet'], info['wager'], info['rank']))
+                                 'values(%s, %s, %s, %s, %s)'.format(bettor),
+                                 (dt.utcfromtimestamp(fighttime), info['balance'], info['bet'], info['wager'], info['rank']))
             conn.commit()
