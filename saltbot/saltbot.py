@@ -263,22 +263,28 @@ class SaltBot(object):
     def run(self):
         ftime = None
         last_won = {'first': {'name': None, 'total': None},
-                    'second': {'name': None, 'total': None}}
+                    'second': {'name': None, 'total': None},
+                    'winner': -1}
         try:
             while True:
                 ftime, fght = self.fight_status(ftime)
-                print(ftime, f"{fght['first']['name']} ({fght['first']['total']}) vs. {fght['second']['name']} ({fght['second']['total']})")
+                if fght['first']['name'] != last_won['first']['name'] and fght['second']['name'] != last_won['second']['name'] and last_won['winner'] != -1:
+                    ftime = None
+                    ftime, fght = self.fight_status(ftime)
+                    last_won['winner'] = -1
                 time.sleep(2)
-                ftime, fght = self.bettor_status(ftime)
-                print(ftime, f"{fght['first']['name']} ({fght['first']['total']}) vs. {fght['second']['name']} ({fght['second']['total']})")
+                if fght['status'] not in ['open', 'over']:
+                    ftime, fght = self.bettor_status(ftime)
+                    print(ftime, f"| {fght['first']['name']} ({fght['first']['total']}) vs. {fght['second']['name']} ({fght['second']['total']})", end="\r")
+
+                print(ftime, f"- {fght['first']['name']} ({fght['first']['total']}) vs. {fght['second']['name']} ({fght['second']['total']})", end="\r")
                 if int(fght['winner']) > -1:
-                    if last_won['first'] != fght['first'] and last_won['second'] != fght['second']:
+                    if last_won['first']['name'] != fght['first']['name'] and last_won['second']['name'] != fght['second']['name']:
                         print(f"{fght['first' if fght['winner'] == 0 else 'second']} won!")
-                        ftime = None
                         last_won['first'] = fght['first']
                         last_won['second'] = fght['second']
+                        last_won['winner'] = fght['winner']
 
-                time.sleep(4)
         except KeyboardInterrupt:
             root.info("Keyboard close")
             print("Cleaning up")
