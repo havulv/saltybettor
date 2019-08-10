@@ -232,20 +232,20 @@ class Betdb(object):
         with Access("saltydb") as conn:
             curs = conn.cursor()
             curs.execute("SELECT table_name from information_schema.tables"
-                         " where table_schema='public' and table_name=bettors")
+                         " where table_schema='public' and table_name='bettors'")
             if curs.fetchone() is None:
                 curs.execute('create table if not exists bettors'
                              '(bettor text, origin timestamp)')
-            else:
-                curs.execute("insert into bettors(bettor, origin) "
-                             "values (%s %s)", (bettor_name, dt.utcfromtimestamp(timestamp)))
+                conn.commit()
+            curs.execute("insert into bettors(bettor, origin) "
+                         "values (%s %s)", (bettor_name, dt.utcfromtimestamp(timestamp)))
             conn.commit()
 
             curs.execute("SELECT table_name from information_schema.tables "
                          "where table_schema='public' and table_name={}".format(bettor_name))
             if curs.fetchone() is None:
                 curs.execute('create table if not exists {}'
-                             '(fighttime timestamp, balance integer, '
+                             '(fighttime timestamp, balance bigint, '
                              'beton integer, wager integer, rank integer)'
                              ''.format(bettor_name))
             conn.commit()
@@ -285,7 +285,7 @@ class Betdb(object):
             for bettor, info in bettors.items():
                 if bettor not in existing:
                     curs.execute('create table if not exists {} '
-                                 '(fighttime timestamp, balance integer, '
+                                 '(fighttime timestamp, balance bigint, '
                                  'beton integer, wager integer, rank integer)'
                                  ''.format(bettor))
                     conn.commit()
@@ -301,4 +301,5 @@ class Betdb(object):
                     curs.execute('insert into {}(fighttime, balance, beton, wager, rank) '
                                  'values(%s, %s, %s, %s, %s)'.format(bettor),
                                  (dt.utcfromtimestamp(fighttime), info['balance'], info['bet'], info['wager'], info['rank']))
+
             conn.commit()
