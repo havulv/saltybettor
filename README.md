@@ -20,3 +20,12 @@ Then follow the [Gmail API](https://developers.google.com/gmail/api/quickstart/p
 
 Eventually I will get this running and then make the gmail dependency disappear because that is about 3/4 of the current dependencies.
 
+## Architecture
+
+`docker-compose` to run up the following:
+
+    * `saltbot`
+    * `postgresSQL`
+    * `redis`
+
+`PostgresSQL` is the long running database which holds all of the long-term data about fights and bettors, `redis` is a nice caching layer which maintains the last few fights, and then `saltbot` is `saltbot`.

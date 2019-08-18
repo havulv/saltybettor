@@ -3,7 +3,7 @@
 echo "Fake Deploying..."
 
 # https://wiki.archlinux.org/index.php/PostgreSQL
-# --- first time --- 
+# --- first time --- >> alpine docker takes care of this
 # Install postgres
 # Setup the db
 # Add a user

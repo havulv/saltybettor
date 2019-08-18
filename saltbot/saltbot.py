@@ -23,10 +23,11 @@ log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "logs"))
 if not os.path.exists(log_dir):
     os.mkdir(log_dir)
 
+
 root = log.getLogger(name='root')
-root.setLevel(log.DEBUG)
+root.setLevel(log.INFO)
 fhandler = log.FileHandler(os.path.join(log_dir, 'saltbot.log'))
-fhandler.setLevel(log.DEBUG)
+fhandler.setLevel(log.INFO)
 formatter = log.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 fhandler.setFormatter(formatter)
 root.addHandler(fhandler)
@@ -71,10 +72,13 @@ class SaltBot(object):
             # At some point I need to grab the cookies from the login or something
             self.driver.close()
 
+        root.info("Connecting to database")
         self.db = Betdb()
+        root.info("Database connected")
         self.db.create_fight_table()
+        root.info("Fight table created")
         self.db.create_bettor_table()
-        root.info("Database loaded into memory")
+        root.info("Bettor table created")
         self.odds_dict = {}
         self.win_dict = {}
         self.avg_odds_dict = {}
@@ -173,10 +177,12 @@ class SaltBot(object):
             database to simplify calls
         '''
         match_time = int(time.time())
+        root.info(f"Getting match at {match_time}")
         req = requests.get(self._base_url + 'state.json',
                            params={'t': match_time})
         if req.status_code != 200:
-            raise Exception('requests error')
+            root.debug(f"Bad status code {req.status_code} on state.json")
+            raise Exception('Failure to fetch data.')
 
         bet_json = req.json()
         fight_status = self.parse_match(bet_json, match_time)
@@ -191,6 +197,11 @@ class SaltBot(object):
             fight_status['status'],
             int(fight_status['winner']))
 
+        root.info(f"Got match at {ftime}: "
+                  "{fight_status['first']['name']} vs. "
+                  "{fight_status['second']['name']} -- "
+                  "winner: {fight_status['winner']}")
+
         return fight_status
 
     def parse_match(self, bet_json, match_time):
@@ -199,6 +210,7 @@ class SaltBot(object):
         if status not in ['open', 'locked']:
             status = 'over'
             winner = bet_json['status']
+            root.debug(f"Fight at {match_time} over -- winner: {winner}")
 
         return {'first': {'name': bet_json['p1name'], 'total': bet_json['p1total']},
                 'second': {'name': bet_json['p2name'], 'total': bet_json['p2total']},
@@ -209,10 +221,13 @@ class SaltBot(object):
 
     def get_bettors(self, fighttime=None):
         match_time = int(time.time())
+
+        root.info(f"Getting bettors at {match_time}")
         req = requests.get(self._base_url + 'zdata.json',
                            params={'t': match_time})
 
         if req.status_code != 200:
+            root.debug(f"Bad status code {req.status_code} on zdata.json")
             raise Exception('requests error')
 
         bettor_json = req.json()
@@ -243,9 +258,16 @@ class SaltBot(object):
             match['status'],
             int(match['winner']))
 
+        root.info(f"Got match at {ftime}: "
+                  "{fight_status['first']['name']} vs. "
+                  "{fight_status['second']['name']} -- "
+                  "winner: {fight_status['winner']}")
+
         self.db.record_bettors(
             bettors,
             ftime)
+
+        root.info(f"Got {len(bettors.keys())} for match at {ftime}")
 
         return ({'bettors': bettors, 'time': ftime}, match)
 
@@ -265,6 +287,7 @@ class SaltBot(object):
         last_won = {'first': {'name': None, 'total': None},
                     'second': {'name': None, 'total': None},
                     'winner': -1}
+        root.info("Starting up the run.")
         try:
             while True:
                 ftime, fght = self.fight_status(ftime)
@@ -292,6 +315,7 @@ class SaltBot(object):
 
 
 def main(args):
+    # setup_logs(args.verbosity[0] * 10)
     creds = None
     if args.email and args.password:
         creds = {'email': args.email,
@@ -301,6 +325,14 @@ def main(args):
         driver=args.driver)
 
     salt_bot.run()
+
+
+def setup_logs(verbosity):
+    req_log = log.getLogger('requests.packages.urllib3')
+    req_log.setLevel(verbosity)
+    req_log.propagate = True
+    root.setLevel(verbosity)
+    fhandler.setLevel(verbosity)
 
 
 def parse_email(addr):
@@ -328,6 +360,9 @@ def parse_args(args):
     parser.add_argument(
         '-d', '--driver', nargs=1, type=str, default=None,
         help=("The path to the driver(s) to use for the bot."))
+    parser.add_argument(
+        '-v', '--verbosity', type=int, choices=range(6), nargs=1, default=[0],
+        help=("Increase the verbosity output to the logs."))
 
     return parser.parse_args(args)
 

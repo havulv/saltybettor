@@ -2,7 +2,7 @@
 
 from setuptools import setup, find_packages
 
-setup(name="saltybettor",
+setup(name="saltbot",
       version="0.1",
       packages=find_packages(exclude=['*.tests', '*.tests.*',
                                       'tests.*', 'tests']),
@@ -12,5 +12,5 @@ setup(name="saltybettor",
       author_email="johnandersen185@gmail.com",
       scripts=['saltbot/scripts/saltybet'],
       description="A bot for placing bets on [SaltyBet](https://www.saltybet.com), running off of selenium and the Gmail API (email alerts).",
-      install_requires=['selenium>=3.3.3', 'beautifulsoup4>=4.7.1', 'requests>=2.2.0', 'psycopg2>=2.8.3'],
+      install_requires=['selenium>=3.3.3', 'beautifulsoup4>=4.7.1', 'requests>=2.2.1', 'psycopg2>=2.8.3'],
       keywords=['saltybet', 'MUGEN'])
