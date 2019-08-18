@@ -1,0 +1,9 @@
+.docker/*
+.git/*
+deploy.sh
+*.md
+.travis.yml
+docker-compose.yml
+Dockerfile
+.gitignore
+Makefile

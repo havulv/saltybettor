@@ -119,3 +119,6 @@ dmypy.json
 ## Special ignores
 *.swp
 *.db
+.docker/db/.pgpass
+.docker/secrets.yml
+data/*

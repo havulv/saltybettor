@@ -1,0 +1,25 @@
+version: 'ac5ebae4388c4a3e797364ad3651e45cc382b717'
+services:
+    saltbot:
+        build:
+            dockerfile: Dockerfile
+        depends_on:
+            - saltdb
+    saltdb:
+        build:
+            context: ./.docker/db
+            dockerfile: Dockerfile
+        volumes:
+            - ./data/postgres:/var/lib/postgres/data
+        expose:
+            - "5432"
+        secrets:
+            - ./.docker/secrets.yml
+#    TODO: implement as a broad caching layer
+#    redis:
+#        image: redis
+#        volumes:
+#            - ./data/redis:/var/lib/redis/data
+#        expose:
+#            - "6379"
+

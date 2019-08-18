@@ -12,6 +12,8 @@ os:
 #   - windows Apparently python on windows is not supported. wtf
 
 before_install:
+    # Docker compose stuff
+    - git rev-parse --verify HEAD | xargs -I '{}' sed -i "1s/.*/version: '{}'/" docker-compose.yml
     - if [[ ":$PATH:" != *":/home/build/.local/bin:"* ]]; then PATH=/home/build/.local/bin:$PATH; fi;
     - pip install virtualenv
     - virtualenv .
