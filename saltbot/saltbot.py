@@ -6,6 +6,7 @@
 '''
 from selenium.common import exceptions as selenium_except
 from selenium import webdriver
+from urllib.parse import urlparse
 import logging as log
 import requests
 import argparse
@@ -58,7 +59,7 @@ class SaltBot(object):
     def __init__(self, driver=None,
                  creds=None,
                  chrome_headless=None):
-        self._base_url = "http://www.saltybet.com/"
+        self.base_url = "http://www.saltybet.com/"
         self.logged_in = False
         if creds and driver:
             self.driver, self.driver_name = self._driver_init(driver,
@@ -83,6 +84,9 @@ class SaltBot(object):
         self.win_dict = {}
         self.avg_odds_dict = {}
         self.fighters = []
+
+        root.info("Fetching cookie")
+        self.get(self.base_url)
 
     def _driver_init(self, name, chrome_headless=None):
         '''
@@ -151,7 +155,7 @@ class SaltBot(object):
                 place and then only changes one item of global state
                 i.e. site -> authenticate -> site (authenticated)
         '''
-        auth_url = self._base_url + "authenticate?signin=1"
+        auth_url = self.base_url + "authenticate?signin=1"
         self.driver.get(auth_url)
         email = self.driver.find_element_by_id("email")
         email.send_keys(credentials['email'])
@@ -162,14 +166,41 @@ class SaltBot(object):
 
         root.info(
             "Authorization submitted for {}".format(credentials['email']))
-        if self.driver.current_url != self._base_url and \
+        if self.driver.current_url != self.base_url and \
                 self.driver.current_url == auth_url:
             root.info("Authorization failed properly")
             return
-        elif self.driver.current_url != self._base_url:
+        elif self.driver.current_url != self.base_url:
             root.info("Authorization failed disastrously")
             raise Exception("AuthenticationError: incorrect redirect")
         self.logged_in = True
+
+    def get(self, url, params={}, headers={}, cookies=None, timeout=1):
+        parsed_url = urlparse(url)
+        req_headers = {
+            'Accept': '*/*',
+            'Host': parsed_url.netloc,
+            'Referer': parsed_url.scheme + '://' + parsed_url.netloc,
+            'Content-Type': 'application/json; charset=utf-8',
+            'DNT': '1',
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0',
+            'X-Requested-With': 'XMLHttpRequest',
+        }
+        req_headers.update(headers)
+        if hasattr(self, 'cookies'):
+            cookies = self.cookies
+
+        req = requests.get(url, params=params, headers=req_headers,
+                           cookies=cookies, timeout=timeout)
+        if req.status_code != 200:
+            root.debug(f"Bad status code {req.status_code} on {parsed_url.path}")
+            raise Exception('Failure to fetch data.')
+        root.info(f'Good request in {req.elapsed.total_seconds()} with '
+                  f'cookies: {req.cookies.items()} ')
+
+        if req.cookies:
+            self.cookies = req.cookies
+        return req
 
     def get_match(self, write=True, fighttime=None):
         '''
@@ -178,11 +209,8 @@ class SaltBot(object):
         '''
         match_time = int(time.time())
         root.info(f"Getting match at {match_time}")
-        req = requests.get(self._base_url + 'state.json',
-                           params={'t': match_time})
-        if req.status_code != 200:
-            root.debug(f"Bad status code {req.status_code} on state.json")
-            raise Exception('Failure to fetch data.')
+        req = self.get(self.base_url + 'state.json',
+                       params={'t': match_time})
 
         bet_json = req.json()
         fight_status = self.parse_match(bet_json, match_time)
@@ -223,12 +251,8 @@ class SaltBot(object):
         match_time = int(time.time())
 
         root.info(f"Getting bettors at {match_time}")
-        req = requests.get(self._base_url + 'zdata.json',
-                           params={'t': match_time})
-
-        if req.status_code != 200:
-            root.debug(f"Bad status code {req.status_code} on zdata.json")
-            raise Exception('requests error')
+        req = self.get(self.base_url + 'zdata.json',
+                       params={'t': match_time})
 
         bettor_json = req.json()
         bettor_data = {k: v for k, v in bettor_json.items() if k.isdigit()}
@@ -308,7 +332,6 @@ class SaltBot(object):
                         last_won['first'] = fght['first']
                         last_won['second'] = fght['second']
                         last_won['winner'] = fght['winner']
-
         except KeyboardInterrupt:
             root.info("Keyboard close")
             print("Cleaning up")
