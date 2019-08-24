@@ -283,9 +283,9 @@ class SaltBot(object):
             int(match['winner']))
 
         root.info(f"Got match at {ftime}: "
-                  "{fight_status['first']['name']} vs. "
-                  "{fight_status['second']['name']} -- "
-                  "winner: {fight_status['winner']}")
+                  f"{match['first']['name']} vs. "
+                  f"{match['second']['name']} -- "
+                  f"winner: {match['winner']}")
 
         self.db.record_bettors(
             bettors,
