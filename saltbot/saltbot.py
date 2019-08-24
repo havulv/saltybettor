@@ -6,6 +6,7 @@
 '''
 from selenium.common import exceptions as selenium_except
 from selenium import webdriver
+from requests import exceptions
 from urllib.parse import urlparse
 import logging as log
 import requests
@@ -190,8 +191,19 @@ class SaltBot(object):
         if hasattr(self, 'cookies'):
             cookies = self.cookies
 
-        req = requests.get(url, params=params, headers=req_headers,
-                           cookies=cookies, timeout=timeout)
+        success = False
+        retry_limit = 4
+        while not success and retry_limit:
+            try:
+                req = requests.get(url, params=params, headers=req_headers,
+                                   cookies=cookies, timeout=timeout)
+                success = True
+            except exceptions.ReadTimeout:
+                root.info(f"Hit a Read Timeout for url {url}. "
+                          f"Doubling backoff is at {timeout}")
+                retry_limit -= 1
+                timeout = timeout * 2
+
         if req.status_code != 200:
             root.debug(f"Bad status code {req.status_code} on {parsed_url.path}")
             raise Exception('Failure to fetch data.')
