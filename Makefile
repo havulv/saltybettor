@@ -2,17 +2,16 @@
 test:
 	pip install -r requirements.txt
 	nosetests --config=setup.cfg
-	pip uninstall -r requirements.txt --yes
 
 build:
 	pip install .
+
+clean:
+	pip uninstall -r requirements.txt --yes
+	pip uninstall saltbot --yes
 	
 run: build
-	python saltbot
+	saltbot
 
 debug: clean test build
 	python saltbot -v 0
-
-clean:
-	pip uninstall saltbot --yes
-
