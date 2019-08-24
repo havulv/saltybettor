@@ -1,0 +1,7 @@
+#! /usr/bin/env python
+
+from saltbot import saltbot
+import sys
+
+if __name__ == "__main__":
+    saltbot.main(saltbot.parse_args(sys.argv[1:]))
