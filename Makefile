@@ -1,7 +1,7 @@
 
-test:
+setup:
+	bash ./saltbot/tests/test_db.sh setup
 	pip install -r requirements.txt
-	nosetests --config=setup.cfg
 
 build:
 	pip install .
@@ -9,9 +9,14 @@ build:
 clean:
 	pip uninstall -r requirements.txt --yes
 	pip uninstall saltbot --yes
-	
+	bash ./saltbot/tests/test_db.sh cleanup
+
+debug: setup
+	-nosetests --config=setup.cfg
+
+test: setup
+	nosetests --config=setup.cfg
+	bash ./saltbot/tests/test_db.sh cleanup
+
 run: build
 	saltbot
-
-debug: clean test build
-	python saltbot -v 0
