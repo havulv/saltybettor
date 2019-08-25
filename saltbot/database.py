@@ -52,6 +52,12 @@ class Access(object):
 
 class Betdb(object):
 
+    def __init__(self, dbname=None):
+        if dbname is not None:
+            self.dbname = 'testing'
+        else:
+            self.dbname = 'saltydb'
+
     def clean_string(func):
         def _clean(self, *args, **kwargs):
             cargs = []
@@ -73,7 +79,7 @@ class Betdb(object):
         return _clean
 
     def create_fight_table(self):
-        with Access("saltydb") as conn:
+        with Access(self.dbname) as conn:
             curs = conn.cursor()
             curs.execute("SELECT table_name from information_schema.tables where "
                          "table_schema='public' and table_name='fights'")
@@ -85,7 +91,7 @@ class Betdb(object):
 
     @clean_string
     def new_fight(self, ftime, first_player, second_player, money1, money2, status, winner):
-        with Access("saltydb") as conn:
+        with Access(self.dbname) as conn:
             curs = conn.cursor()
             curs.execute(
                 'insert into fights(time, p1, p2, m1, m2, winner) '
@@ -98,7 +104,7 @@ class Betdb(object):
     @clean_string
     def record_fight(self, ftime, first_player, second_player,
                      money1=0, money2=0, status='Open', winner=0):
-        with Access("saltydb") as conn:
+        with Access(self.dbname) as conn:
             curs = conn.cursor()
             curs.execute(
                 'select m1, m2, status, winner from fights'
@@ -286,7 +292,8 @@ class Betdb(object):
                 if bettor not in existing:
                     curs.execute('create table if not exists {} '
                                  '(fighttime timestamp, balance bigint, '
-                                 'beton integer, wager integer, rank integer)'
+                                 'beton integer, wager integer, rank integer, '
+                                 'ranking integer)'
                                  ''.format(bettor))
                     conn.commit()
                 curs.execute('SELECT balance, beton, wager, rank from {}'
@@ -294,12 +301,18 @@ class Betdb(object):
                              {'ftime': dt.utcfromtimestamp(fighttime)})
                 if curs.fetchone() is not None:
                     curs.execute("update {} set balance=%(bal)s, beton=%(bt)s, "
-                                 "wager=%(wag)s, rank=%(rn)s where fighttime=%(ftime)s".format(bettor),
+                                 "wager=%(wag)s, rank=%(rn)s, ranking=%(rn)s,"
+                                 " where fighttime=%(ftime)s".format(bettor),
                                  {'bal': info['balance'], 'bt': info['bet'],
-                                  'wag': info['wager'], 'rn': info['rank'], 'ftime': dt.utcfromtimestamp(fighttime)})
+                                  'wag': info['wager'], 'rn': info['rank'],
+                                  'ftime': dt.utcfromtimestamp(fighttime),
+                                  'rnk': info['ranking']})
                 else:
-                    curs.execute('insert into {}(fighttime, balance, beton, wager, rank) '
-                                 'values(%s, %s, %s, %s, %s)'.format(bettor),
-                                 (dt.utcfromtimestamp(fighttime), info['balance'], info['bet'], info['wager'], info['rank']))
+                    curs.execute('insert into {}(fighttime, balance, beton, '
+                                 'wager, rank) values(%s, %s, %s, %s, %s, %s)'
+                                 ''.format(bettor),
+                                 (dt.utcfromtimestamp(fighttime),
+                                  info['balance'], info['bet'], info['wager'],
+                                  info['rank'], info['ranking']))
 
             conn.commit()

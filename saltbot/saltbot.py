@@ -59,8 +59,9 @@ class SaltBot(object):
 
     def __init__(self, driver=None,
                  creds=None,
-                 chrome_headless=None):
-        self.base_url = "http://www.saltybet.com/"
+                 chrome_headless=None,
+                 dbname=None):
+        self.base_url = "https://www.saltybet.com/"
         self.logged_in = False
         if creds and driver:
             self.driver, self.driver_name = self._driver_init(driver,
@@ -75,7 +76,7 @@ class SaltBot(object):
             self.driver.close()
 
         root.info("Connecting to database")
-        self.db = Betdb()
+        self.db = Betdb(dbname)
         root.info("Database connected")
         self.db.create_fight_table()
         root.info("Fight table created")
@@ -181,7 +182,7 @@ class SaltBot(object):
         req_headers = {
             'Accept': '*/*',
             'Host': parsed_url.netloc,
-            'Referer': parsed_url.scheme + '://' + parsed_url.netloc,
+            'Referer': parsed_url.scheme + '://' + parsed_url.netloc + '/',
             'Content-Type': 'application/json; charset=utf-8',
             'DNT': '1',
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0',
@@ -204,7 +205,10 @@ class SaltBot(object):
                 retry_limit -= 1
                 timeout = timeout * 2
 
-        if req.status_code != 200:
+        if not success:
+            root.debug(f'Too many read timeouts for {parsed_url.path}')
+            raise exceptions.ReadTimeout
+        elif req.status_code != 200:
             root.debug(f"Bad status code {req.status_code} on {parsed_url.path}")
             raise Exception('Failure to fetch data.')
         root.info(f'Good request in {req.elapsed.total_seconds()} with '
@@ -280,6 +284,7 @@ class SaltBot(object):
             bettors[name]['bet'] = values.get('p')
             bettors[name]['wager'] = values.get('w')
             bettors[name]['rank'] = values.get('r')
+            bettors[name]['ranking'] = ind
             if bettors[name]['rank'] is not None:
                 if len(bettors[name]['rank']) > 2:
                     bettors[name]['rank'] = 25
