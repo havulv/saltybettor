@@ -1,15 +1,16 @@
 sudo: required
 # I need to create a new docker image to compile for this repo
 # Or, I can use something that has either gcc or whatever
+
 # Why are people lagging behind on 3.6. This is ridiculous. Using generic install
 # python:
 #     - "3.6"
 
+env:
+  - DOCKER_COMPOSE_VERSION: 1.23.2
+
 services:
   - docker
-
-env:
-  DOCKER_COMPOSE_VERSION: 1.23.2
 
 # Docker compose stuff
 before_install:
