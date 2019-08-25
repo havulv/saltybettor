@@ -42,6 +42,8 @@ class Access(object):
                 first_conn.close()
                 self.conn = self.dbase.connect(dbname=self.dbname, user="saltbot",
                                                host="localhost")
+            else:
+                raise e
 
     def __enter__(self):
         return self.conn
