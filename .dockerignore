@@ -6,4 +6,3 @@ deploy.sh
 docker-compose.yml
 Dockerfile
 .gitignore
-Makefile

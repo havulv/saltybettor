@@ -2,6 +2,7 @@ version: "3.3"
 services:
     saltbot:
         build:
+            context: ./
             dockerfile: Dockerfile
         depends_on:
             - saltdb
@@ -14,7 +15,10 @@ services:
         expose:
             - "5432"
         secrets:
-            - ./.docker/secrets.yml
+            - db_secret
+secrets:
+    db_secret:
+        file: ./.docker/secrets.yml
 #    TODO: implement as a broad caching layer
 #    redis:
 #        image: redis
