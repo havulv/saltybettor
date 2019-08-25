@@ -6,20 +6,14 @@ language: python
 # python:
 #     - "3.6"
 
-os:
-    - linux
-#   - osx apparently 3.6 can't be downloaded? wtf.
-#   - windows Apparently python on windows is not supported. wtf
-#
-
 services:
     - docker
 
+# Docker compose stuff
 before_install:
-    # Docker compose stuff
     - git rev-parse --verify HEAD | xargs -I '{}' sed -i "1s/.*/version: '{}'/" docker-compose.yml
     - docker-compose up
 
+#  Test the package
 script:
-#     Test the package
     - ./deploy.sh
