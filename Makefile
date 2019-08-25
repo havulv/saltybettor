@@ -1,6 +1,6 @@
 
 setup:
-	bash ./saltbot/tests/test_db.sh setup
+	[[ $(TEST_LOCAL) ]] && bash ./saltbot/tests/test_db.sh setup
 	pip install -r requirements.txt
 
 build:
@@ -9,7 +9,7 @@ build:
 clean:
 	pip uninstall -r requirements.txt --yes
 	pip uninstall saltbot --yes
-	bash ./saltbot/tests/test_db.sh cleanup
+	[[ $(TEST_LOCAL) ]] && bash ./saltbot/tests/test_db.sh cleanup
 
 debug: setup
 	-nosetests --config=setup.cfg

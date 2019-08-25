@@ -1,4 +1,4 @@
-language: python
+sudo: required
 # I need to create a new docker image to compile for this repo
 # Or, I can use something that has either gcc or whatever
 
@@ -6,14 +6,28 @@ language: python
 # python:
 #     - "3.6"
 
+env:
+  DOCKER_COMPOSE_VERSION: 1.23.2
+
 services:
-    - docker
+  - docker
 
 # Docker compose stuff
 before_install:
-    - git rev-parse --verify HEAD | xargs -I '{}' sed -i "1s/.*/version: '{}'/" docker-compose.yml
-    - docker-compose up
+  - sudo rm /usr/local/bin/docker-compose
+  - curl -L https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-`uname -s`-`uname -m` > docker-compose
+  - chmod +x docker-compose
+  - sudo mv docker-compose /usr/local/bin
+  - git rev-parse --verify HEAD | xargs -I '{}' sed -i "1s/.*/version: '{}'/" docker-compose.yml
+  - export TEST_LOCAL=False
+
+before_script:
+  - docker-compose up -d --build
 
 #  Test the package
 script:
-    - ./deploy.sh
+  - docker-compose exec saltbot make test
+  - ./deploy.sh
+
+after_script:
+  - docker-compose down

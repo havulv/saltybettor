@@ -1,4 +1,4 @@
-version: 'ac5ebae4388c4a3e797364ad3651e45cc382b717'
+version: '7cf8205c9f71f9a953de2d586ca7f28cf3383fc2'
 services:
     saltbot:
         build:
