@@ -2,6 +2,10 @@
 FROM jfoff/alpine-python:latest-slim
 
 COPY . /app
+
+# For building // testing
 RUN make /app/ test
-RUN make /app/ build
-CMD python -m /app/saltbot
+RUN make /app/ clean 
+
+# On deploy use this
+# CMD saltbot
