@@ -254,8 +254,8 @@ class Betdb(object):
             if curs.fetchone() is None:
                 curs.execute('create table if not exists {}'
                              '(fighttime timestamp, balance bigint, '
-                             'beton integer, wager integer, rank integer)'
-                             ''.format(bettor_name))
+                             'beton integer, wager integer, rank integer,'
+                             ' ranking integer)'.format(bettor_name))
             conn.commit()
 
     @clean_string
@@ -298,21 +298,26 @@ class Betdb(object):
                                  'ranking integer)'
                                  ''.format(bettor))
                     conn.commit()
-                curs.execute('SELECT balance, beton, wager, rank from {}'
+                    curs.execute('insert into bettors(bettor, origin) values '
+                                 '(%s, %s)',
+                                 (bettor, dt.utcfromtimestamp(fighttime)))
+                    conn.commit()
+                curs.execute('SELECT * from {}'
                              ' where fighttime=%(ftime)s'.format(bettor),
                              {'ftime': dt.utcfromtimestamp(fighttime)})
                 if curs.fetchone() is not None:
                     curs.execute("update {} set balance=%(bal)s, beton=%(bt)s, "
-                                 "wager=%(wag)s, rank=%(rn)s, ranking=%(rn)s,"
+                                 "wager=%(wag)s, rank=%(rn)s, ranking=%(rn)s"
                                  " where fighttime=%(ftime)s".format(bettor),
                                  {'bal': info['balance'], 'bt': info['bet'],
                                   'wag': info['wager'], 'rn': info['rank'],
                                   'ftime': dt.utcfromtimestamp(fighttime),
                                   'rnk': info['ranking']})
                 else:
+
                     curs.execute('insert into {}(fighttime, balance, beton, '
-                                 'wager, rank) values(%s, %s, %s, %s, %s, %s)'
-                                 ''.format(bettor),
+                                 'wager, rank, ranking) values'
+                                 '(%s, %s, %s, %s, %s, %s)'.format(bettor),
                                  (dt.utcfromtimestamp(fighttime),
                                   info['balance'], info['bet'], info['wager'],
                                   info['rank'], info['ranking']))
