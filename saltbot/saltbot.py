@@ -89,7 +89,18 @@ class SaltBot(object):
         self.fighters = []
 
         root.info("Creating session")
+
+        # Create the session and update the headers
         self.session = requests.Session()
+        self.session.headers.update({
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Content-Type': 'application/json; charset=utf-8',
+            'DNT': '1',
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0',
+            'X-Requested-With': 'XMLHttpRequest',
+        })
+
         root.info("Fetching cookie")
         self.get(self.base_url)
 
@@ -180,27 +191,22 @@ class SaltBot(object):
             raise Exception("AuthenticationError: incorrect redirect")
         self.logged_in = True
 
-    def get(self, url, params={}, headers={}, cookies=None, timeout=1):
+    def get(self, url, params={}, timeout=1, headers=None):
         parsed_url = urlparse(url)
-        req_headers = {
-            'Accept': '*/*',
+        location_headers = {
             'Host': parsed_url.netloc,
             'Referer': parsed_url.scheme + '://' + parsed_url.netloc + '/',
-            'Content-Type': 'application/json; charset=utf-8',
-            'DNT': '1',
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0',
-            'X-Requested-With': 'XMLHttpRequest',
         }
-        req_headers.update(headers)
-        if hasattr(self, 'cookies'):
-            cookies = self.cookies
+        if headers:
+            location_headers.update(headers)
+        self.session.headers.update(location_headers)
 
         success = False
         retry_limit = 4
         while not success and retry_limit:
             try:
-                req = self.session.get(url, params=params, headers=req_headers,
-                                       cookies=cookies, timeout=timeout)
+                req = self.session.get(url, params=params, timeout=timeout)
+                print(req, req.json(), req.status_code)
                 success = True
             except exceptions.ReadTimeout:
                 root.info(f"Hit a Read Timeout for url {url}. "
@@ -215,10 +221,8 @@ class SaltBot(object):
             root.debug(f"Bad status code {req.status_code} on {parsed_url.path}")
             raise Exception('Failure to fetch data.')
         root.info(f'Good request in {req.elapsed.total_seconds()} with '
-                  f'cookies: {req.cookies.items()} ')
+                  f'cookies: {self.session.cookies.items()} ')
 
-        if req.cookies:
-            self.cookies = req.cookies
         return req
 
     def get_match(self, write=True, fighttime=None):
