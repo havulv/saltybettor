@@ -82,11 +82,14 @@ class SaltBot(object):
         root.info("Fight table created")
         self.db.create_bettor_table()
         root.info("Bettor table created")
+
         self.odds_dict = {}
         self.win_dict = {}
         self.avg_odds_dict = {}
         self.fighters = []
 
+        root.info("Creating session")
+        self.session = requests.Session()
         root.info("Fetching cookie")
         self.get(self.base_url)
 
@@ -196,8 +199,8 @@ class SaltBot(object):
         retry_limit = 4
         while not success and retry_limit:
             try:
-                req = requests.get(url, params=params, headers=req_headers,
-                                   cookies=cookies, timeout=timeout)
+                req = self.session.get(url, params=params, headers=req_headers,
+                                       cookies=cookies, timeout=timeout)
                 success = True
             except exceptions.ReadTimeout:
                 root.info(f"Hit a Read Timeout for url {url}. "
