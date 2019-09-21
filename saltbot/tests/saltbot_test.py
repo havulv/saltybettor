@@ -16,7 +16,7 @@ import time
 def test_get_home(silent_requests, site_cookies):
     bot = SaltBot(dbname='testing')
     bot.get('https://www.saltybet.com')
-    assert bot.cookies == site_cookies
+    assert bot.session.cookies == site_cookies
 
 
 def test_get_state(silent_requests):
