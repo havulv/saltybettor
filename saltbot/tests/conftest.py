@@ -1,9 +1,11 @@
 #! /usr/bin/env python3
 
 from urllib.parse import urlparse
+from requests import cookies
+import psycopg2
+import requests
 import pytest
 import random
-import requests
 import time
 
 '''
@@ -21,7 +23,7 @@ def site_headers():
     return {
         'Accept': '*/*',
         'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip,deflate br',
+        'Accept-Encoding': 'gzip, deflate',
         'Host': 'www.saltybet.com',
         'Referer': 'https://www.saltybet.com/',
         'Content-Type': 'application/json; charset=utf-8',
@@ -132,10 +134,16 @@ def zdata_expired():
 
 @pytest.fixture
 def site_cookies():
-    return {
-        '__cfduid': 'd38637fd5fcdd51ba17c23f4f34fd12be1566670847',
-        'PHPSESSID': 'f3240botpio78qaqjqa75os9q7'
-    }
+    jar = cookies.RequestsCookieJar()
+    jar.set_cookie(cookies.create_cookie(
+        name='__cfduid',
+        value='d38637fd5fcdd51ba17c23f4f34fd12be1566670847',
+    ))
+    jar.set_cookie(cookies.create_cookie(
+        name='PHPSESSID',
+        value='f3240botpio78qaqjqa75os9q7',
+    ))
+    return jar
 
 
 @pytest.fixture(scope='function')
@@ -153,7 +161,7 @@ def silent_requests(
             def json(self):
                 return self.json_data
 
-            class Elapsed:
+            class elapsed:
 
                 def total_seconds():
                     return 2
@@ -168,7 +176,7 @@ def silent_requests(
 
         url = urlparse(args[1])
         if "https://www.saltybet.com/" == (url.scheme + "://" + url.netloc + '/'):
-            headers = kwargs.get('headers')
+            headers = kwargs.get('headers') or args[0].headers
             if headers is None:
                 return MockResponse('', 403, {})
             for k, v in headers.items():
@@ -178,10 +186,12 @@ def silent_requests(
                     return MockResponse('', 403, {})
 
             if url.path in ['/', '']:
+                if hasattr(args[0], 'cookies'):
+                    args[0].cookies = site_cookies
                 return MockResponse(
                     '', 200, site_cookies)
             else:
-                cookies = kwargs.get('cookies')
+                cookies = kwargs.get('cookies') or args[0].cookies
                 if cookies is None:
                     return MockResponse('', 403, {})
 
@@ -218,3 +228,12 @@ def silent_requests(
 '''
     Database fixture that mocks database calls
 '''
+
+
+@pytest.fixture
+def silent_database(monkeypatch):
+
+    class MockConnection():
+        pass
+
+    monkeypatch.setattr(psycopg2, 'connect', MockConnection)
