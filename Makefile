@@ -1,4 +1,8 @@
 
+ifndef TEST_LOCAL
+	TEST_LOCAL=True
+endif 
+
 setup:
 	-[[ "$(TEST_LOCAL)" == "True" ]] && bash ./saltbot/tests/test_db.sh setup
 	pip install -r requirements.txt
