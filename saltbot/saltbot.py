@@ -4,6 +4,7 @@
     TODO: Implement a timer thread, so that the database writes
           arent't counted in addition to the sleeper
 '''
+from saltbot.database import Betdb, digit_map
 from selenium.common import exceptions as selenium_except
 from selenium import webdriver
 from requests import exceptions
@@ -16,10 +17,6 @@ import sys
 import re
 import os
 
-try:
-    from .database import Betdb, digit_map
-except ImportError:
-    from database import Betdb, digit_map
 
 log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "logs"))
 if not os.path.exists(log_dir):
@@ -206,7 +203,6 @@ class SaltBot(object):
         while not success and retry_limit:
             try:
                 req = self.session.get(url, params=params, timeout=timeout)
-                print(req, req.json(), req.status_code)
                 success = True
             except exceptions.ReadTimeout:
                 root.info(f"Hit a Read Timeout for url {url}. "
@@ -225,7 +221,7 @@ class SaltBot(object):
 
         return req
 
-    def get_match(self, write=True, fighttime=None):
+    def get_match(self, fighttime=None):
         '''
             Get the match -- write auto updates // writes the match to the
             database to simplify calls
@@ -294,7 +290,7 @@ class SaltBot(object):
             bettors[name]['ranking'] = ind
             if bettors[name]['rank'] is not None:
                 if len(bettors[name]['rank']) > 2:
-                    bettors[name]['rank'] = 25
+                    bettors[name]['rank'] = str(25)
 
         ftime = match['time'] if fighttime is None else fighttime
         self.db.record_fight(
@@ -330,14 +326,14 @@ class SaltBot(object):
         ftime = fight_status['time'] if fighttime is None else fighttime
         return ftime, fight_status
 
-    def run(self):
+    def run(self, number=-1):
         ftime = None
         last_won = {'first': {'name': None, 'total': None},
                     'second': {'name': None, 'total': None},
                     'winner': -1}
         root.info("Starting up the run.")
         try:
-            while True:
+            while True or number == 0:
                 ftime, fght = self.fight_status(ftime)
                 if fght['first']['name'] != last_won['first']['name'] and fght['second']['name'] != last_won['second']['name'] and last_won['winner'] != -1:
                     ftime = None
@@ -353,6 +349,8 @@ class SaltBot(object):
                     if last_won['first']['name'] != fght['first']['name'] and last_won['second']['name'] != fght['second']['name']:
                         print(' ' * os.get_terminal_size()[0], end='\r')
                         print(f"{fght['first' if fght['winner'] == 0 else 'second']} won!")
+                        if number > 0:
+                            number = number - 1
                         last_won['first'] = fght['first']
                         last_won['second'] = fght['second']
                         last_won['winner'] = fght['winner']
