@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 
 from datetime import datetime as dt
+from saltbot import exceptions
 import psycopg2
 import time
 import re
@@ -56,7 +57,7 @@ class Betdb(object):
 
     def __init__(self, dbname=None):
         if dbname is not None:
-            self.dbname = 'testing'
+            self.dbname = dbname
         else:
             self.dbname = 'saltydb'
 
@@ -81,6 +82,9 @@ class Betdb(object):
         return _clean
 
     def create_fight_table(self):
+        '''
+            Create the fight table. Noop -- raises on err
+        '''
         with Access(self.dbname) as conn:
             curs = conn.cursor()
             curs.execute("SELECT table_name from information_schema.tables where "
@@ -90,6 +94,10 @@ class Betdb(object):
                              'timestamp, p1 text, p2 text, m1 integer, '
                              'm2 integer, status text, winner integer)')
                 conn.commit()
+                curs.execute("SELECT table_name from information_schema.tables where "
+                             "table_schema='public' and table_name='fights'")
+                if curs.fetchone() is None:
+                    raise exceptions.TableCreationError
 
     @clean_string
     def new_fight(self, ftime, first_player, second_player, money1, money2, status, winner):
@@ -182,18 +190,7 @@ class Betdb(object):
         return set([i for j in ret for i in j]) if ret is not None else ret
 
     def get_all_winners(self):
-        ''' Returns a dictionary of all recorded fighters and their wins'''
-        ret = None
-        with Access("saltydb") as conn:
-            curs = conn.cursor()
-            curs.execute("select p1, p2, winner from fights")
-            ret = curs.fetchall()
-            if ret is not None:
-                ret = {[p1, p2][win] for p1, p2, win in ret if win > 0}
-        return ret
-
-    def get_all_losers(self):
-        ''' Returns a dictionary of all recorded fighters and their losses'''
+        ''' Returns a set of all winners'''
         ret = None
         with Access("saltydb") as conn:
             curs = conn.cursor()
@@ -201,6 +198,17 @@ class Betdb(object):
             ret = curs.fetchall()
             if ret is not None:
                 ret = {[p1, p2][win - 1] for p1, p2, win in ret if win > 0}
+        return ret
+
+    def get_all_losers(self):
+        ''' Returns a set of all recorded fighters that lost'''
+        ret = None
+        with Access("saltydb") as conn:
+            curs = conn.cursor()
+            curs.execute("select p1, p2, winner from fights")
+            ret = curs.fetchall()
+            if ret is not None:
+                ret = {[p2, p1][win - 1] for p1, p2, win in ret if win > 0}
         return ret
 
     def get_all_fights(self):
