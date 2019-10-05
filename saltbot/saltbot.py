@@ -347,7 +347,10 @@ class SaltBot(object):
                 print(ftime, f"- {fght['first']['name']} ({fght['first']['total']}) vs. {fght['second']['name']} ({fght['second']['total']})", end="\r")
                 if int(fght['winner']) > -1:
                     if last_won['first']['name'] != fght['first']['name'] and last_won['second']['name'] != fght['second']['name']:
-                        print(' ' * os.get_terminal_size()[0], end='\r')
+                        try:
+                            print(' ' * os.get_terminal_size()[0], end='\r')
+                        except OSError:  # if there is no terminal
+                            print(' ' * 50, end='\r')
                         print(f"{fght['first' if fght['winner'] == 0 else 'second']} won!")
                         if number > 0:
                             number = number - 1
