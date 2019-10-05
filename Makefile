@@ -16,10 +16,10 @@ clean:
 	-[[ "$(TEST_LOCAL)" == "True" ]] && bash ./saltbot/tests/test_db.sh cleanup
 
 debug: setup
-	-nosetests --config=setup.cfg
+	-pytest --config=setup.cfg
 
 test: setup
-	nosetests --config=setup.cfg
+	pytest --config=setup.cfg
 	bash ./saltbot/tests/test_db.sh cleanup
 
 run: build
