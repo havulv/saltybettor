@@ -62,13 +62,16 @@ def test_get_match(silent_requests, silent_database):
 def test_parse_match(silent_requests, silent_database,
                      state_resp_open_parsed):
     bot = SaltBot(dbname='testing')
-    ftime = time.time()
-    state_resp_open_parsed['time'] = ftime
-    resp = bot.get(
-        'https://www.saltybet.com/zdata.json',
-        params={'t': int(ftime)})
-    fight = bot.parse_match(resp.json(), ftime)
-    assert fight == state_resp_open_parsed
+    fights = []
+    for _ in range(2):
+        ftime = time.time()
+        state_resp_open_parsed['time'] = ftime
+        resp = bot.get(
+            'https://www.saltybet.com/zdata.json',
+            params={'t': int(ftime)})
+        fights.append(bot.parse_match(resp.json(), ftime))
+        time.sleep(5)
+    assert any([fight == state_resp_open_parsed for fight in fights])
 
 
 def test_get_bettors(silent_requests, silent_database):
